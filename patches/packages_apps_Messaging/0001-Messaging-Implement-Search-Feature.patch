@@ -1,0 +1,489 @@
+From e3465a69039cc41a664ec959cc0a169d7d882323 Mon Sep 17 00:00:00 2001
+From: grepfox <grepfox@tutamail.com>
+Date: Thu, 9 Apr 2026 22:27:25 +0530
+Subject: [PATCH] Messaging: Implement Search Feature
+
+Change-Id: I6fa88c4bcd222b24678efb36db68bbe9f4c539bb
+---
+ res/drawable/ic_search_light.xml              |  25 ++++
+ res/menu/conversation_list_fragment_menu.xml  |   8 ++
+ res/values/strings.xml                        |   3 +
+ .../datamodel/data/ConversationListData.java  |  61 +++++++++-
+ .../ConversationListActivity.java             | 110 ++++++++++++++++++
+ .../ConversationListFragment.java             |  54 ++++++++-
+ 6 files changed, 256 insertions(+), 5 deletions(-)
+ create mode 100644 res/drawable/ic_search_light.xml
+
+diff --git a/res/drawable/ic_search_light.xml b/res/drawable/ic_search_light.xml
+new file mode 100644
+index 0000000..f886e7f
+--- /dev/null
++++ b/res/drawable/ic_search_light.xml
+@@ -0,0 +1,25 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++    Copyright (C) 2026 The Android Open Source Project
++
++    Licensed under the Apache License, Version 2.0 (the "License");
++    you may not use this file except in compliance with the License.
++    You may obtain a copy of the License at
++
++         http://www.apache.org/licenses/LICENSE-2.0
++
++    Unless required by applicable law or agreed to in writing, software
++    distributed under the License is distributed on an "AS IS" BASIS,
++    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++    See the License for the specific language governing permissions and
++    limitations under the License.
++-->
++<vector xmlns:android="http://schemas.android.com/apk/res/android"
++    android:width="24dp"
++    android:height="24dp"
++    android:viewportWidth="24"
++    android:viewportHeight="24">
++    <path
++        android:fillColor="@android:color/white"
++        android:pathData="M15.5,14h-0.79l-0.28,-0.27a6.01,6.01 0,0 0,1.48 -3.95A6.03,6.03 0,0 0,9.88 3.75,6.03 6.03,0 0,0 3.85,9.78a6.03,6.03 0,0 0,6.03 6.03,6.01 6.01,0 0,0 3.95,-1.48l0.27,0.28v0.79l4.99,4.98 1.49,-1.49L15.5,14zM9.88,14A4.22,4.22 0,0 1,5.66 9.78,4.22 4.22,0 0,1 9.88,5.56a4.22,4.22 0,0 1,4.22 4.22A4.22,4.22 0,0 1,9.88 14z" />
++</vector>
+diff --git a/res/menu/conversation_list_fragment_menu.xml b/res/menu/conversation_list_fragment_menu.xml
+index e0a848f..82a74d5 100644
+--- a/res/menu/conversation_list_fragment_menu.xml
++++ b/res/menu/conversation_list_fragment_menu.xml
+@@ -25,6 +25,14 @@
+         android:visible="false"
+         appcompat:showAsAction="ifRoom" />
+ 
++    <item
++        android:id="@+id/action_search"
++        android:icon="@drawable/ic_search_light"
++        android:orderInCategory="150"
++        android:title="@string/action_search"
++        appcompat:actionViewClass="androidx.appcompat.widget.SearchView"
++        appcompat:showAsAction="ifRoom|collapseActionView" />
++
+     <item
+         android:id="@+id/action_show_archived"
+         android:orderInCategory="200"
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index 4dee609..b29aea9 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -24,6 +24,9 @@
+     <!-- The title when selecting a conversation to share to -->
+     <string name="share_intent_activity_label">Select conversation</string>
+ 
++    <string name="action_search">Search</string>
++    <string name="conversation_list_search_hint">Search conversations</string>
++    <string name="conversation_list_search_empty_text">No conversations found</string>
+     <string name="action_settings">Settings</string>
+     <string name="sendButtonContentDescription">Send Message</string>
+     <string name="attachMediaButtonContentDescription">Add an attachment</string>
+diff --git a/src/com/android/messaging/datamodel/data/ConversationListData.java b/src/com/android/messaging/datamodel/data/ConversationListData.java
+index c33ebf8..2329846 100644
+--- a/src/com/android/messaging/datamodel/data/ConversationListData.java
++++ b/src/com/android/messaging/datamodel/data/ConversationListData.java
+@@ -20,6 +20,7 @@ package com.android.messaging.datamodel.data;
+ import android.content.Context;
+ import android.database.Cursor;
+ import android.os.Bundle;
++import android.text.TextUtils;
+ 
+ import androidx.annotation.NonNull;
+ import androidx.loader.app.LoaderManager;
+@@ -52,6 +53,22 @@ public class ConversationListData extends BindableData
+             "(" + ConversationListViewColumns.ARCHIVE_STATUS + " = 1)";
+     public static final String WHERE_NOT_ARCHIVED =
+             "(" + ConversationListViewColumns.ARCHIVE_STATUS + " = 0)";
++    private static final String LIKE_ESCAPE = "\\";
++    private static final String WHERE_SEARCH_MATCHES =
++            "(" + ConversationListViewColumns.NAME + " LIKE ? ESCAPE '" + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.SNIPPET_TEXT + " LIKE ? ESCAPE '" + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.SUBJECT_TEXT + " LIKE ? ESCAPE '" + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.DRAFT_SNIPPET_TEXT + " LIKE ? ESCAPE '"
++            + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.DRAFT_SUBJECT_TEXT + " LIKE ? ESCAPE '"
++            + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.SNIPPET_SENDER_FIRST_NAME + " LIKE ? ESCAPE '"
++            + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.SNIPPET_SENDER_DISPLAY_DESTINATION
++            + " LIKE ? ESCAPE '" + LIKE_ESCAPE + "' OR "
++            + ConversationListViewColumns.OTHER_PARTICIPANT_NORMALIZED_DESTINATION
++            + " LIKE ? ESCAPE '" + LIKE_ESCAPE + "')";
++    private static final int SEARCH_MATCH_ARGUMENT_COUNT = 8;
+ 
+     public interface ConversationListDataListener {
+         void onConversationListCursorUpdated(ConversationListData data, Cursor cursor);
+@@ -61,6 +78,7 @@ public class ConversationListData extends BindableData
+     private ConversationListDataListener mListener;
+     private final Context mContext;
+     private final boolean mArchivedMode;
++    private String mSearchQuery = "";
+     private LoaderManager mLoaderManager;
+ 
+     public ConversationListData(final Context context, final ConversationListDataListener listener,
+@@ -101,8 +119,8 @@ public class ConversationListData extends BindableData
+                     loader = new BoundCursorLoader(bindingId, mContext,
+                             MessagingContentProvider.CONVERSATIONS_URI,
+                             ConversationListItemData.PROJECTION,
+-                            mArchivedMode ? WHERE_ARCHIVED : WHERE_NOT_ARCHIVED,
+-                            null,       // selection args
++                            getConversationSelection(),
++                            getConversationSelectionArgs(),
+                             SORT_ORDER);
+                     break;
+                 default:
+@@ -209,7 +227,46 @@ public class ConversationListData extends BindableData
+         }
+     }
+ 
++    public void setSearchQuery(final String searchQuery) {
++        final String normalizedQuery = searchQuery == null ? "" : searchQuery.trim();
++        if (TextUtils.equals(mSearchQuery, normalizedQuery)) {
++            return;
++        }
++        mSearchQuery = normalizedQuery;
++        if (mLoaderManager != null) {
++            mLoaderManager.restartLoader(CONVERSATION_LIST_LOADER, mArgs, this);
++        }
++    }
++
+     public HashSet<String> getBlockedParticipants() {
+         return mBlockedParticipants;
+     }
++
++    private String getConversationSelection() {
++        final String archiveSelection = mArchivedMode ? WHERE_ARCHIVED : WHERE_NOT_ARCHIVED;
++        if (TextUtils.isEmpty(mSearchQuery)) {
++            return archiveSelection;
++        }
++        return archiveSelection + " AND " + WHERE_SEARCH_MATCHES;
++    }
++
++    private String[] getConversationSelectionArgs() {
++        if (TextUtils.isEmpty(mSearchQuery)) {
++            return null;
++        }
++
++        final String likeArgument = '%' + escapeLikeArgument(mSearchQuery) + '%';
++        final String[] selectionArgs = new String[SEARCH_MATCH_ARGUMENT_COUNT];
++        for (int i = 0; i < selectionArgs.length; i++) {
++            selectionArgs[i] = likeArgument;
++        }
++        return selectionArgs;
++    }
++
++    private static String escapeLikeArgument(final String searchQuery) {
++        return searchQuery
++                .replace(LIKE_ESCAPE, LIKE_ESCAPE + LIKE_ESCAPE)
++                .replace("%", LIKE_ESCAPE + "%")
++                .replace("_", LIKE_ESCAPE + "_");
++    }
+ }
+diff --git a/src/com/android/messaging/ui/conversationlist/ConversationListActivity.java b/src/com/android/messaging/ui/conversationlist/ConversationListActivity.java
+index d20173c..7e1c827 100644
+--- a/src/com/android/messaging/ui/conversationlist/ConversationListActivity.java
++++ b/src/com/android/messaging/ui/conversationlist/ConversationListActivity.java
+@@ -19,17 +19,29 @@ package com.android.messaging.ui.conversationlist;
+ 
+ import android.graphics.drawable.ColorDrawable;
+ import android.os.Bundle;
++import android.text.TextUtils;
+ import android.view.Menu;
+ import android.view.MenuItem;
+ 
+ import androidx.annotation.NonNull;
++import androidx.annotation.Nullable;
+ import androidx.appcompat.app.ActionBar;
++import androidx.appcompat.widget.SearchView;
+ 
+ import com.android.messaging.R;
+ import com.android.messaging.ui.UIIntents;
+ import com.android.messaging.util.Trace;
+ 
+ public class ConversationListActivity extends AbstractConversationListActivity {
++    private static final String SAVED_INSTANCE_STATE_SEARCH_QUERY = "search_query";
++    private static final String SAVED_INSTANCE_STATE_SEARCH_EXPANDED = "search_expanded";
++
++    @Nullable
++    private MenuItem mSearchMenuItem;
++    @Nullable
++    private SearchView mSearchView;
++    private String mSearchQuery = "";
++    private boolean mShouldExpandSearch;
+ 
+     @Override
+     protected void onCreate(final Bundle savedInstanceState) {
+@@ -41,10 +53,29 @@ public class ConversationListActivity extends AbstractConversationListActivity {
+                 .beginTransaction()
+                 .add(android.R.id.content, mConversationListFragment)
+                 .commit();
++        if (savedInstanceState != null) {
++            mSearchQuery = savedInstanceState.getString(SAVED_INSTANCE_STATE_SEARCH_QUERY, "");
++            mShouldExpandSearch = savedInstanceState.getBoolean(
++                    SAVED_INSTANCE_STATE_SEARCH_EXPANDED, !TextUtils.isEmpty(mSearchQuery));
++            mConversationListFragment.setSearchQuery(mSearchQuery);
++        }
+         Trace.endSection();
+         invalidateActionBar();
+     }
+ 
++    @Override
++    protected void onDestroy() {
++        if (mSearchView != null) {
++            mSearchView.setOnQueryTextListener(null);
++        }
++        if (mSearchMenuItem != null) {
++            mSearchMenuItem.setOnActionExpandListener(null);
++        }
++        mSearchView = null;
++        mSearchMenuItem = null;
++        super.onDestroy();
++    }
++
+     @Override
+     protected void updateActionBar(final ActionBar actionBar) {
+         actionBar.setTitle(getString(R.string.app_name));
+@@ -70,6 +101,8 @@ public class ConversationListActivity extends AbstractConversationListActivity {
+     public void onBackPressed() {
+         if (isInConversationListSelectMode()) {
+             exitMultiSelectState();
++        } else if (collapseSearchIfExpanded()) {
++            return;
+         } else {
+             super.onBackPressed();
+         }
+@@ -81,9 +114,18 @@ public class ConversationListActivity extends AbstractConversationListActivity {
+             return true;
+         }
+         getMenuInflater().inflate(R.menu.conversation_list_fragment_menu, menu);
++        configureSearch(menu);
+         return true;
+     }
+ 
++    @Override
++    protected void onSaveInstanceState(@NonNull final Bundle outState) {
++        super.onSaveInstanceState(outState);
++        outState.putString(SAVED_INSTANCE_STATE_SEARCH_QUERY, mSearchQuery);
++        outState.putBoolean(SAVED_INSTANCE_STATE_SEARCH_EXPANDED,
++                mSearchMenuItem != null && mSearchMenuItem.isActionViewExpanded());
++    }
++
+     @Override
+     public boolean onOptionsItemSelected(@NonNull final MenuItem menuItem) {
+         int itemId = menuItem.getItemId();
+@@ -103,6 +145,74 @@ public class ConversationListActivity extends AbstractConversationListActivity {
+         return super.onOptionsItemSelected(menuItem);
+     }
+ 
++    private void configureSearch(@NonNull final Menu menu) {
++        mSearchMenuItem = menu.findItem(R.id.action_search);
++        if (mSearchMenuItem == null) {
++            return;
++        }
++
++        final SearchView searchView = (SearchView) mSearchMenuItem.getActionView();
++        mSearchView = searchView;
++        searchView.setMaxWidth(Integer.MAX_VALUE);
++        searchView.setQueryHint(getString(R.string.conversation_list_search_hint));
++        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
++            @Override
++            public boolean onQueryTextSubmit(final String query) {
++                updateSearchQuery(query);
++                searchView.clearFocus();
++                return true;
++            }
++
++            @Override
++            public boolean onQueryTextChange(final String newText) {
++                updateSearchQuery(newText);
++                return true;
++            }
++        });
++        mSearchMenuItem.setOnActionExpandListener(new MenuItem.OnActionExpandListener() {
++            @Override
++            public boolean onMenuItemActionExpand(final MenuItem item) {
++                mShouldExpandSearch = true;
++                return true;
++            }
++
++            @Override
++            public boolean onMenuItemActionCollapse(final MenuItem item) {
++                mShouldExpandSearch = false;
++                searchView.setQuery("", false);
++                searchView.clearFocus();
++                updateSearchQuery("");
++                return true;
++            }
++        });
++
++        if (mShouldExpandSearch) {
++            mSearchMenuItem.expandActionView();
++            searchView.setQuery(mSearchQuery, false);
++            searchView.clearFocus();
++        }
++    }
++
++    private void updateSearchQuery(@Nullable final String searchQuery) {
++        final String normalizedQuery = searchQuery == null ? "" : searchQuery.trim();
++        if (TextUtils.equals(mSearchQuery, normalizedQuery)) {
++            return;
++        }
++
++        mSearchQuery = normalizedQuery;
++        if (mConversationListFragment != null) {
++            mConversationListFragment.setSearchQuery(mSearchQuery);
++        }
++    }
++
++    private boolean collapseSearchIfExpanded() {
++        if (mSearchMenuItem != null && mSearchMenuItem.isActionViewExpanded()) {
++            mSearchMenuItem.collapseActionView();
++            return true;
++        }
++        return false;
++    }
++
+     @Override
+     public void onActionBarHome() {
+         exitMultiSelectState();
+diff --git a/src/com/android/messaging/ui/conversationlist/ConversationListFragment.java b/src/com/android/messaging/ui/conversationlist/ConversationListFragment.java
+index bfafae0..7dab6f9 100644
+--- a/src/com/android/messaging/ui/conversationlist/ConversationListFragment.java
++++ b/src/com/android/messaging/ui/conversationlist/ConversationListFragment.java
+@@ -23,6 +23,7 @@ import android.graphics.Rect;
+ import android.net.Uri;
+ import android.os.Bundle;
+ import android.os.Parcelable;
++import android.text.TextUtils;
+ import android.view.LayoutInflater;
+ import android.view.Menu;
+ import android.view.MenuInflater;
+@@ -95,7 +96,10 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+     // critical for correctness.
+     private static final String SAVED_INSTANCE_STATE_LIST_VIEW_STATE_KEY =
+             "conversationListViewState";
++    private static final String SAVED_INSTANCE_STATE_SEARCH_QUERY_KEY =
++            "conversationListSearchQuery";
+     private Parcelable mListState;
++    private String mSearchQuery = "";
+ 
+     final Binding<ConversationListData> mListBinding = BindingBase.createBinding(this);
+ 
+@@ -138,6 +142,9 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+     }
+ 
+     public void setScrolledToNewestConversationIfNeeded() {
++        if (mRecyclerView == null || mHost == null) {
++            return;
++        }
+         if (!mArchiveMode
+                 && !mForwardMessageMode
+                 && isScrolledToFirstConversation()
+@@ -162,6 +169,18 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+         mHost = null;
+     }
+ 
++    @Override
++    public void onDestroyView() {
++        super.onDestroyView();
++        if (mRecyclerView != null) {
++            mRecyclerView.setAdapter(null);
++            mRecyclerView = null;
++        }
++        mEmptyListMessageView = null;
++        mStartNewConversationButton = null;
++        mShowBlockedMenuItem = null;
++    }
++
+     /**
+      * {@inheritDoc} from Fragment
+      */
+@@ -217,6 +236,7 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+         if (savedInstanceState != null) {
+             mListState = savedInstanceState.getParcelable(SAVED_INSTANCE_STATE_LIST_VIEW_STATE_KEY,
+                     Parcelable.class);
++            mSearchQuery = savedInstanceState.getString(SAVED_INSTANCE_STATE_SEARCH_QUERY_KEY, "");
+         }
+ 
+         mStartNewConversationButton = rootView.findViewById(R.id.start_new_conversation_button);
+@@ -248,6 +268,7 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+             mForwardMessageMode = arguments.getBoolean(BUNDLE_FORWARD_MESSAGE_MODE, false);
+         }
+         mListBinding.bind(DataModel.get().createConversationListData(context, this, mArchiveMode));
++        mListBinding.getData().setSearchQuery(mSearchQuery);
+     }
+ 
+ 
+@@ -257,12 +278,15 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+         if (mListState != null) {
+             outState.putParcelable(SAVED_INSTANCE_STATE_LIST_VIEW_STATE_KEY, mListState);
+         }
++        outState.putString(SAVED_INSTANCE_STATE_SEARCH_QUERY_KEY, mSearchQuery);
+     }
+ 
+     @Override
+     public void onPause() {
+         super.onPause();
+-        mListState = mRecyclerView.getLayoutManager().onSaveInstanceState();
++        if (mRecyclerView != null) {
++            mListState = mRecyclerView.getLayoutManager().onSaveInstanceState();
++        }
+         mListBinding.getData().setScrolledToNewestConversation(false);
+     }
+ 
+@@ -271,8 +295,10 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+             final Cursor cursor) {
+         mListBinding.ensureBound(data);
+         final Cursor oldCursor = mAdapter.swapCursor(cursor);
+-        updateEmptyListUi(cursor == null || cursor.getCount() == 0);
+-        if (mListState != null && cursor != null && oldCursor == null) {
++        if (mEmptyListMessageView != null) {
++            updateEmptyListUi(cursor == null || cursor.getCount() == 0);
++        }
++        if (mRecyclerView != null && mListState != null && cursor != null && oldCursor == null) {
+             mRecyclerView.getLayoutManager().onRestoreInstanceState(mListState);
+         }
+     }
+@@ -289,6 +315,23 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+         mAdapter.notifyDataSetChanged();
+     }
+ 
++    public void setSearchQuery(final String searchQuery) {
++        final String normalizedQuery = searchQuery == null ? "" : searchQuery.trim();
++        if (TextUtils.equals(mSearchQuery, normalizedQuery)) {
++            return;
++        }
++
++        mSearchQuery = normalizedQuery;
++        if (mListBinding.isBound()) {
++            mListBinding.getData().setSearchQuery(mSearchQuery);
++        }
++
++        if (mAdapter != null && mEmptyListMessageView != null) {
++            final Cursor cursor = mAdapter.getCursor();
++            updateEmptyListUi(cursor == null || cursor.getCount() == 0);
++        }
++    }
++
+     @Override
+     public void onPrepareOptionsMenu(@NonNull final Menu menu) {
+         super.onPrepareOptionsMenu(menu);
+@@ -349,10 +392,15 @@ public class ConversationListFragment extends Fragment implements ConversationLi
+ 
+     // Show and hide empty list UI as needed with appropriate text based on view specifics
+     private void updateEmptyListUi(final boolean isEmpty) {
++        if (mEmptyListMessageView == null) {
++            return;
++        }
+         if (isEmpty) {
+             int emptyListText;
+             if (!mListBinding.getData().getHasFirstSyncCompleted()) {
+                 emptyListText = R.string.conversation_list_first_sync_text;
++            } else if (!TextUtils.isEmpty(mSearchQuery)) {
++                emptyListText = R.string.conversation_list_search_empty_text;
+             } else if (mArchiveMode) {
+                 emptyListText = R.string.archived_conversation_list_empty_text;
+             } else {
+-- 
+2.43.0
+

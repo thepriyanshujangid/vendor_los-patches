@@ -1,0 +1,61 @@
+From aa39557ca49de611b841fbe5986fc0e16323f807 Mon Sep 17 00:00:00 2001
+From: Danny Lin <danny@kdrag0n.dev>
+Date: Tue, 5 Oct 2021 20:05:42 -0700
+Subject: [PATCH 37/37] SystemUI: Remove Android build number from QS footer
+
+This is only shown when developer settings is enabled, but we developers
+tend to always have it enabled. Irrelevant text showing up in the QS
+footer is a bit ugly and it's not really useful when this information is
+easily accessible in Settings anyway.
+
+Change-Id: Ideb38eeb603dc5c51945fafeae9c4eca18531b5d
+---
+ .../domain/interactor/BuildNumberInteractor.kt  |  3 +--
+ .../com/android/systemui/qs/QSFooterView.java   | 17 +++--------------
+ 2 files changed, 4 insertions(+), 16 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/development/domain/interactor/BuildNumberInteractor.kt b/packages/SystemUI/src/com/android/systemui/development/domain/interactor/BuildNumberInteractor.kt
+index cedd5161a777..dfcf9f570a15 100644
+--- a/packages/SystemUI/src/com/android/systemui/development/domain/interactor/BuildNumberInteractor.kt
++++ b/packages/SystemUI/src/com/android/systemui/development/domain/interactor/BuildNumberInteractor.kt
+@@ -60,8 +60,7 @@ constructor(
+      */
+     val buildNumber: StateFlow<BuildNumber?> =
+         userRepository.selectedUserInfo
+-            .flatMapConcat { userInfo -> repository.isDevelopmentSettingEnabled(userInfo) }
+-            .map { enabled -> buildText.takeIf { enabled } }
++            .map { null }
+             .stateIn(applicationScope, WhileSubscribed(), null)
+ 
+     private val buildText =
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/QSFooterView.java b/packages/SystemUI/src/com/android/systemui/qs/QSFooterView.java
+index 5a872d699f35..b22dacc3db57 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/QSFooterView.java
++++ b/packages/SystemUI/src/com/android/systemui/qs/QSFooterView.java
+@@ -86,20 +86,9 @@ public class QSFooterView extends FrameLayout {
+ 
+     private void setBuildText() {
+         if (mBuildText == null) return;
+-        if (DevelopmentSettingsEnabler.isDevelopmentSettingsEnabled(mContext)) {
+-            mBuildText.setText(mContext.getString(
+-                    com.android.internal.R.string.bugreport_status,
+-                    Build.VERSION.RELEASE_OR_CODENAME,
+-                    Build.ID));
+-            // Set as selected for marquee before its made visible, then it won't be announced when
+-            // it's made visible.
+-            mBuildText.setSelected(true);
+-            mShouldShowBuildText = true;
+-        } else {
+-            mBuildText.setText(null);
+-            mShouldShowBuildText = false;
+-            mBuildText.setSelected(false);
+-        }
++        mBuildText.setText(null);
++        mShouldShowBuildText = false;
++        mBuildText.setSelected(false);
+     }
+ 
+     @Override
+-- 
+2.43.0
+

@@ -1,0 +1,76 @@
+From 2f6173a5d024eec9cad79dd142f89efc9fc5a9c4 Mon Sep 17 00:00:00 2001
+From: Abhay Singh Gill <abhaygill017@gmail.com>
+Date: Sat, 9 Aug 2025 00:01:06 +0530
+Subject: [PATCH 09/11] Settings: Kill play store too when applying new PIF
+ data
+
+Change-Id: I7c46079c2fdb55e3c237d465dccff9bf46daf29c
+Signed-off-by: Abhay Singh Gill <abhaygill017@gmail.com>
+---
+ res/values/custom_strings.xml                 |  2 +-
+ .../settings/security/PifDataPreference.java  | 22 ++++++++++---------
+ 2 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index dbea453a74d..de110db6d23 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -42,6 +42,6 @@
+ 
+     <!-- Pif Data -->
+     <string name="pif_data_title">Select PIF JSON to spoof</string>
+-    <string name="pif_data_summary">Select PIF JSON used for prop attestation spoofing for google mobile services. Click the delete button in order to reset the PIF data props and use dynamic PIF props which are used by default.</string>
++    <string name="pif_data_summary">Select PIF JSON used for prop attestation spoofing for google mobile services and play store. Click the delete button in order to reset the PIF data props and use dynamic PIF props which are used by default.</string>
+ 
+ </resources>
+diff --git a/src/com/android/settings/security/PifDataPreference.java b/src/com/android/settings/security/PifDataPreference.java
+index 5449c7d5a6d..93784eeb752 100644
+--- a/src/com/android/settings/security/PifDataPreference.java
++++ b/src/com/android/settings/security/PifDataPreference.java
+@@ -63,7 +63,7 @@ public class PifDataPreference extends Preference {
+             Toast.makeText(getContext(), "User PIF data cleared", Toast.LENGTH_SHORT).show();
+             callChangeListener(null);
+ 
+-            killGms();
++            killPackages();
+         });
+     }
+ 
+@@ -91,23 +91,25 @@ public class PifDataPreference extends Preference {
+             Toast.makeText(getContext(), "JSON file loaded", Toast.LENGTH_SHORT).show();
+             callChangeListener(json);
+ 
+-            killGms();
++            killPackages();
+         } catch (IOException e) {
+             Log.e(TAG, "Failed to read JSON file", e);
+             Toast.makeText(getContext(), "Failed to read JSON", Toast.LENGTH_SHORT).show();
+         }
+     }
+ 
+-    private void killGms() {
++    private void killPackages() {
+         try {
+-            ActivityManager am = (ActivityManager)
+-                    getContext().getSystemService(Context.ACTIVITY_SERVICE);
+-            am.getClass()
+-              .getMethod("forceStopPackage", String.class)
+-              .invoke(am, "com.google.android.gms");
+-            Log.i(TAG, "GMS process killed");
++            ActivityManager am = (ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
++            String[] packages = { "com.google.android.gms", "com.android.vending" };
++            for (String pkg : packages) {
++                am.getClass()
++                  .getMethod("forceStopPackage", String.class)
++                  .invoke(am, pkg);
++                Log.i(TAG, pkg + " process killed");
++            }
+         } catch (Exception e) {
+-            Log.e(TAG, "Failed to kill GMS process", e);
++            Log.e(TAG, "Failed to kill packages", e);
+         }
+     }
+ }
+-- 
+2.43.0
+

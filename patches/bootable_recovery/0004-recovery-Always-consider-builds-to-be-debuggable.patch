@@ -1,0 +1,52 @@
+From 4d0164ab4800d746b679e695f16399edc24359f7 Mon Sep 17 00:00:00 2001
+From: Pranav Vashi <neobuddy89@gmail.com>
+Date: Sat, 27 May 2023 14:21:46 +0530
+Subject: [PATCH 4/6] recovery: Always consider builds to be debuggable
+
+Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+Signed-off-by: Dmitrii <bankersenator@gmail.com>
+---
+ recovery.cpp      | 2 +-
+ recovery_main.cpp | 6 +-----
+ 2 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/recovery.cpp b/recovery.cpp
+index d84b15d2..a96dab9e 100644
+--- a/recovery.cpp
++++ b/recovery.cpp
+@@ -124,7 +124,7 @@ static bool save_current_log = false;
+  */
+ 
+ static bool IsRoDebuggable() {
+-  return android::base::GetBoolProperty("ro.debuggable", false);
++  return true;
+ }
+ 
+ // Clear the recovery command and prepare to boot a (hopefully working) system,
+diff --git a/recovery_main.cpp b/recovery_main.cpp
+index e34e91be..eedd4104 100644
+--- a/recovery_main.cpp
++++ b/recovery_main.cpp
+@@ -70,7 +70,7 @@ static constexpr const char* LOCALE_FILE = "/cache/recovery/last_locale";
+ static RecoveryUI* ui = nullptr;
+ 
+ static bool IsRoDebuggable() {
+-  return android::base::GetBoolProperty("ro.debuggable", false);
++  return true;
+ }
+ 
+ static bool IsDeviceUnlocked() {
+@@ -497,10 +497,6 @@ int main(int argc, char** argv) {
+     device->RemoveMenuItemForAction(Device::ENTER_RESCUE);
+   }
+ 
+-  if (get_build_type() != "userdebug") {
+-    device->RemoveMenuItemForAction(Device::ENABLE_ADB);
+-  }
+-
+   ui->SetBackground(RecoveryUI::NONE);
+   if (show_text) ui->ShowText(true);
+ 
+-- 
+2.34.1
+

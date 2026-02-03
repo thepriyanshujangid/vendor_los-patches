@@ -1,0 +1,27 @@
+From d5ba4c0dea8beabd4e7e90c23181e0f493c46912 Mon Sep 17 00:00:00 2001
+From: Ido Ben-Hur <idoybh2@gmail.com>
+Date: Mon, 28 Jul 2025 15:49:52 +0300
+Subject: [PATCH 10/11] KeyboxDataPreference: Accept N >= 1 certs per key [2/2]
+
+it's not always 3...
+---
+ src/com/android/settings/security/KeyboxDataPreference.java | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/com/android/settings/security/KeyboxDataPreference.java b/src/com/android/settings/security/KeyboxDataPreference.java
+index d9d1de53d60..da13b265a4d 100644
+--- a/src/com/android/settings/security/KeyboxDataPreference.java
++++ b/src/com/android/settings/security/KeyboxDataPreference.java
+@@ -178,7 +178,7 @@ public class KeyboxDataPreference extends Preference {
+         }
+ 
+         return numberOfKeyboxes == 1
+-                && hasEcdsaKey && hasEcdsaPrivKey && ecdsaCertCount == 3
+-                && hasRsaKey && hasRsaPrivKey && rsaCertCount == 3;
++                && hasEcdsaKey && hasEcdsaPrivKey && ecdsaCertCount >= 1
++                && hasRsaKey && hasRsaPrivKey && rsaCertCount >= 1;
+     }
+ }
+-- 
+2.43.0
+

@@ -1,0 +1,27 @@
+From 4df58a089079f45f151943ad4d7448760133f87f Mon Sep 17 00:00:00 2001
+From: rmp22 <195054967+rmp22@users.noreply.github.com>
+Date: Thu, 23 Oct 2025 19:31:21 +0800
+Subject: [PATCH 6/6] allowing spl downgrade by default
+
+Change-Id: I7981916eabdf379694737893417847edafe70ce3
+Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+---
+ install/install.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/install/install.cpp b/install/install.cpp
+index e16d505d..a077d812 100644
+--- a/install/install.cpp
++++ b/install/install.cpp
+@@ -424,7 +424,7 @@ static InstallResult TryUpdateBinary(Package* package, bool* wipe_cache,
+ 
+   bool spl_downgrade_approved = false;
+   const auto allow_spl_downgrade =
+-      android::base::GetBoolProperty("persist.vendor.recovery_allow_spl_downgrade", false);
++      android::base::GetBoolProperty("persist.vendor.recovery_allow_spl_downgrade", true);
+   const auto current_spl = android::base::GetProperty("ro.build.version.security_patch", "");
+   if (ViolatesSPLDowngrade(zip, current_spl)) {
+     if (!allow_spl_downgrade || !ui->IsTextVisible()) {
+-- 
+2.34.1
+

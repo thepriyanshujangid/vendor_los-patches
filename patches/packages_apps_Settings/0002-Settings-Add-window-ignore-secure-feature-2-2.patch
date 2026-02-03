@@ -1,0 +1,44 @@
+From 03aed3ffe9a1625af0acb0ba1d18baf5f2425eef Mon Sep 17 00:00:00 2001
+From: LibXZR <i@xzr.moe>
+Date: Sat, 23 Apr 2022 20:02:33 +0900
+Subject: [PATCH 02/11] Settings: Add window ignore secure feature [2/2]
+
+Feature: yt/KSCOPE-23
+Change-Id: Ibdd7406a3e59373813c9a98233e6c04b8554d618
+Co-authored-by: Adithya R <gh0strider.2k18.reborn@gmail.com>
+Signed-off-by: LibXZR <i@xzr.moe>
+---
+ res/values/custom_strings.xml              | 3 +++
+ res/xml/more_security_privacy_settings.xml | 6 ++++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index 6039b594bf3..7bb31d4c23e 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -22,4 +22,7 @@
+     <string name="menu_show_overlay">Show overlay</string>
+     <string name="menu_hide_overlay">Hide overlay</string>
+ 
++    <!-- Ignore window secure -->
++    <string name="ignore_window_secure_title">Ignore window secure flags</string>
++    <string name="ignore_window_secure_summary">Remove screenshot and screenrecord limits for all apps. This can be convenient in some cases but may lead to privacy leaks.</string>
+ </resources>
+diff --git a/res/xml/more_security_privacy_settings.xml b/res/xml/more_security_privacy_settings.xml
+index 978668abb2b..9732c383dd3 100644
+--- a/res/xml/more_security_privacy_settings.xml
++++ b/res/xml/more_security_privacy_settings.xml
+@@ -236,4 +236,10 @@
+             android:summary="@string/hide_applist_summary"
+             android:fragment="com.android.settings.custom.privacy.HideAppListSettings" />
+ 
++    <lineageos.preference.GlobalSettingSwitchPreference
++        android:key="window_ignore_secure"
++        android:title="@string/ignore_window_secure_title"
++        android:summary="@string/ignore_window_secure_summary"
++        android:defaultValue="true"/>
++
+ </PreferenceScreen>
+-- 
+2.43.0
+

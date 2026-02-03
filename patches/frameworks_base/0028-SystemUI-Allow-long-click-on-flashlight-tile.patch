@@ -1,0 +1,29 @@
+From d4f03ff09d0094743ce364bd7f58da504e8f3e46 Mon Sep 17 00:00:00 2001
+From: Abhay Singh Gill <abhaygill017@gmail.com>
+Date: Fri, 19 Sep 2025 22:22:13 +0530
+Subject: [PATCH 28/37] SystemUI: Allow long click on flashlight tile
+
+Would be useful for adjusting flashlight strength when the tile is small/ icon only.
+
+Change-Id: I4ea4159b926e2a1bd1693c692ee090f937cc9317
+Signed-off-by: Abhay Singh Gill <abhaygill017@gmail.com>
+---
+ .../src/com/android/systemui/qs/tiles/FlashlightTile.java       | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+index ec7e200cf2ef..454c6768f8a8 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+@@ -98,7 +98,7 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+     @Override
+     public BooleanState newTileState() {
+         BooleanState state = new BooleanState();
+-        state.handlesLongClick = false;
++        state.handlesLongClick = true;
+         return state;
+     }
+ 
+-- 
+2.43.0
+

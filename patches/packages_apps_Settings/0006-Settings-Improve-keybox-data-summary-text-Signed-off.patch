@@ -1,0 +1,26 @@
+From 097071c1ebe64ac98a8fdfbf6b79c4a235097f84 Mon Sep 17 00:00:00 2001
+From: Ritesh <SahanyRitesh@proton.me>
+Date: Sat, 14 Jun 2025 11:56:54 +0530
+Subject: [PATCH 06/11] Settings: Improve keybox data summary text
+ Signed-off-by: Ritesh <SahanyRitesh@proton.me>
+
+Change-Id: I2252131e22c88b923e45af5c01969d20668ac3e4
+---
+ res/values/custom_strings.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index 4080ad0e4a6..cdd4f10b234 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -38,6 +38,6 @@
+ 
+     <!-- Keybox Data -->
+     <string name="keybox_data_title">Select keybox XML to spoof</string>
+-    <string name="keybox_data_summary">Select keybox XML used for key attestation spoofing for all apps system wide. Click the delete button in order to reset the keybox data values used by the system.</string>
++    <string name="keybox_data_summary">Select the keybox XML used for system-wide key attestation spoofing. Click delete to reset keybox data.</string>
+ 
+ </resources>
+-- 
+2.43.0
+

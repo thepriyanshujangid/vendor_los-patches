@@ -1,0 +1,485 @@
+From 43d078eaa0a237ab83a7df62969a1d4ff2f810d1 Mon Sep 17 00:00:00 2001
+From: Oliver Scott <olivercscott@gmail.com>
+Date: Mon, 10 Apr 2023 12:35:40 -0400
+Subject: [PATCH 32/37] base: Add support for hide applist [1/2]
+
+Author: Wang Han <wanghan1995315@gmail.com>
+Date:   Tue Aug 29 15:21:14 2023 +0000
+
+Change-Id: I8caa9030f4ff44babda5a778d0e0d6849e1e4d1b
+Signed-off-by: someone5678 <59456192+someone5678@users.noreply.github.com>
+Signed-off-by: Saikrishna1504 <saikrishna26918@gmail.com>
+---
+ core/java/android/provider/Settings.java      |   7 +
+ .../util/custom/HideAppListUtils.java         | 115 ++++++++++++++
+ .../validators/SecureSettingsValidators.java  |   1 +
+ .../android/server/HideAppListService.java    |  84 +++++++++++
+ .../com/android/server/pm/ComputerEngine.java | 140 +++++++++++++++++-
+ .../java/com/android/server/SystemServer.java |   2 +
+ 6 files changed, 347 insertions(+), 2 deletions(-)
+ create mode 100644 core/java/com/android/internal/util/custom/HideAppListUtils.java
+ create mode 100644 services/core/java/com/android/server/HideAppListService.java
+
+diff --git a/core/java/android/provider/Settings.java b/core/java/android/provider/Settings.java
+index d02095432a12..65eff394f8a6 100644
+--- a/core/java/android/provider/Settings.java
++++ b/core/java/android/provider/Settings.java
+@@ -13361,6 +13361,13 @@ public final class Settings {
+         @Readable
+         public static final String KEYBOX_DATA = "keybox_data";
+ 
++        /**
++         * Control which apps to hide from other user apps.
++         * @hide
++         */
++        @Readable
++        public static final String HIDE_APPLIST = "hide_applist";
++
+         /**
+          * Keys we no longer back up under the current schema, but want to continue to
+          * process when restoring historical backup datasets.
+diff --git a/core/java/com/android/internal/util/custom/HideAppListUtils.java b/core/java/com/android/internal/util/custom/HideAppListUtils.java
+new file mode 100644
+index 000000000000..dc9c2d22d76d
+--- /dev/null
++++ b/core/java/com/android/internal/util/custom/HideAppListUtils.java
+@@ -0,0 +1,115 @@
++package com.android.internal.util.custom;
++
++import android.content.ContentResolver;
++import android.content.Context;
++import android.os.SystemProperties;
++import android.provider.Settings;
++
++import java.util.Arrays;
++import java.util.HashSet;
++import java.util.Set;
++
++public class HideAppListUtils {
++    enum Action {
++        ADD,
++        REMOVE,
++        SET
++    }
++
++    private static boolean isBootCompleted() {
++        return SystemProperties.getBoolean("sys.boot_completed", false);
++    }
++
++    public static boolean shouldHideAppList(Context context, String packageName) {
++        return shouldHideAppList(context.getContentResolver(), packageName);
++    }
++
++    public static boolean shouldHideAppList(ContentResolver cr, String packageName) {
++        if (cr == null || packageName == null || !isBootCompleted()) {
++            return false;
++        }
++
++        Set<String> apps = getApps(cr);
++        if (apps.isEmpty()) {
++            return false;
++        }
++
++        return apps.contains(packageName);
++    }
++
++    public static Set<String> getApps(Context context) {
++        if (context == null) {
++            return new HashSet<>();
++        }
++
++        return getApps(context.getContentResolver());
++    }
++
++    public static Set<String> getApps(ContentResolver cr) {
++        if (cr == null) {
++            return new HashSet<>();
++        }
++
++        String apps = "";
++        try {
++            apps = Settings.Secure.getString(cr, Settings.Secure.HIDE_APPLIST);
++        } catch (IllegalStateException e) {
++            return new HashSet<>();
++        }
++        if (apps != null && !apps.isEmpty() && !apps.equals(",")) {
++            return new HashSet<>(Arrays.asList(apps.split(",")));
++        }
++
++        return new HashSet<>();
++    }
++
++    private static void putAppsForUser(
++            Context context, String packageName, int userId, Action action) {
++        if (context == null || userId < 0) {
++            return;
++        }
++
++        final Set<String> apps = getApps(context);
++        switch (action) {
++            case ADD:
++                apps.add(packageName);
++                break;
++            case REMOVE:
++                apps.remove(packageName);
++                break;
++            case SET:
++                // Don't change
++                break;
++        }
++
++        Settings.Secure.putStringForUser(
++                context.getContentResolver(),
++                Settings.Secure.HIDE_APPLIST,
++                String.join(",", apps),
++                userId);
++    }
++
++    public void addApp(Context mContext, String packageName, int userId) {
++        if (mContext == null || packageName == null || userId < 0) {
++            return;
++        }
++
++        putAppsForUser(mContext, packageName, userId, Action.ADD);
++    }
++
++    public void removeApp(Context mContext, String packageName, int userId) {
++        if (mContext == null || packageName == null || userId < 0) {
++            return;
++        }
++
++        putAppsForUser(mContext, packageName, userId, Action.REMOVE);
++    }
++
++    public void setApps(Context mContext, int userId) {
++        if (mContext == null || userId < 0) {
++            return;
++        }
++
++        putAppsForUser(mContext, null, userId, Action.SET);
++    }
++}
+diff --git a/packages/SettingsProvider/src/android/provider/settings/validators/SecureSettingsValidators.java b/packages/SettingsProvider/src/android/provider/settings/validators/SecureSettingsValidators.java
+index 5f3145c8b228..7c0b1a898c7c 100644
+--- a/packages/SettingsProvider/src/android/provider/settings/validators/SecureSettingsValidators.java
++++ b/packages/SettingsProvider/src/android/provider/settings/validators/SecureSettingsValidators.java
+@@ -524,5 +524,6 @@ public class SecureSettingsValidators {
+         VALIDATORS.put(Secure.KEYBOX_DATA, ANY_STRING_VALIDATOR);
+         VALIDATORS.put(Secure.PIF_DATA, ANY_STRING_VALIDATOR);
+         VALIDATORS.put(Secure.FETCHED_PIF, ANY_STRING_VALIDATOR);
++        VALIDATORS.put(Secure.HIDE_APPLIST, ANY_STRING_VALIDATOR);
+     }
+ }
+diff --git a/services/core/java/com/android/server/HideAppListService.java b/services/core/java/com/android/server/HideAppListService.java
+new file mode 100644
+index 000000000000..5253424858bc
+--- /dev/null
++++ b/services/core/java/com/android/server/HideAppListService.java
+@@ -0,0 +1,84 @@
++/*
++ * Copyright (C) 2025 the AxionAOSP Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.server;
++
++import android.content.BroadcastReceiver;
++import android.content.ContentResolver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.os.Handler;
++import android.os.UserHandle;
++import android.provider.Settings;
++import android.util.Slog;
++import com.android.server.SystemService;
++
++import java.util.Arrays;
++import java.util.HashSet;
++import java.util.Set;
++
++public class HideAppListService extends SystemService {
++    private static final String TAG = "HideAppListService";
++
++    private final Context mContext;
++    private final Handler mHandler = new Handler();
++
++    public HideAppListService(Context context) {
++        super(context);
++        mContext = context;
++    }
++
++    @Override
++    public void onStart() {
++        Slog.i(TAG, "Starting HideAppListService");
++    }
++
++    @Override
++    public void onBootPhase(int phase) {
++        if (phase == SystemService.PHASE_BOOT_COMPLETED) {
++            IntentFilter filter = new IntentFilter();
++            filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
++            filter.addDataScheme("package");
++            mContext.registerReceiver(new PackageUninstallReceiver(), filter);
++        }
++    }
++
++    private class PackageUninstallReceiver extends BroadcastReceiver {
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            String packageName = intent.getData().getSchemeSpecificPart();
++            if (packageName != null) {
++                Slog.i(TAG, "Package uninstalled: " + packageName);
++                removeFromHideAppList(packageName);
++            }
++        }
++    }
++
++    private void removeFromHideAppList(String packageName) {
++        ContentResolver cr = mContext.getContentResolver();
++        String apps = Settings.Secure.getString(cr, Settings.Secure.HIDE_APPLIST);
++
++        if (apps == null || apps.isEmpty() || apps.equals(",")) {
++            return;
++        }
++
++        Set<String> appSet = new HashSet<>(Arrays.asList(apps.split(",")));
++        if (appSet.remove(packageName)) {
++            Slog.i(TAG, "Removing package due to reason: UNINSTALLED: " + packageName);
++            Settings.Secure.putString(cr, Settings.Secure.HIDE_APPLIST, String.join(",", appSet));
++        }
++    }
++}
+diff --git a/services/core/java/com/android/server/pm/ComputerEngine.java b/services/core/java/com/android/server/pm/ComputerEngine.java
+index 3300f3481792..b19b87048714 100644
+--- a/services/core/java/com/android/server/pm/ComputerEngine.java
++++ b/services/core/java/com/android/server/pm/ComputerEngine.java
+@@ -181,6 +181,8 @@ import java.util.Optional;
+ import java.util.Set;
+ import java.util.UUID;
+ 
++import com.android.internal.util.custom.HideAppListUtils;
++
+ /**
+  * This class contains the implementation of the Computer functions.  It
+  * is entirely self-contained - it has no implicit access to
+@@ -985,6 +987,10 @@ public class ComputerEngine implements Computer {
+ 
+     public final ApplicationInfo getApplicationInfo(String packageName,
+             @PackageManager.ApplicationInfoFlagsBits long flags, int userId) {
++        if (canHideApp(Binder.getCallingUid(), packageName) &&
++            HideAppListUtils.shouldHideAppList(mContext, packageName)) {
++            return null;
++        }
+         return getApplicationInfoInternal(packageName, flags, Binder.getCallingUid(), userId);
+     }
+ 
+@@ -998,6 +1004,10 @@ public class ComputerEngine implements Computer {
+             @PackageManager.ApplicationInfoFlagsBits long flags,
+             int filterCallingUid, int userId) {
+         if (!mUserManager.exists(userId)) return null;
++        if (canHideApp(Binder.getCallingUid(), packageName) &&
++            HideAppListUtils.shouldHideAppList(mContext, packageName)) {
++            return null;
++        }
+         flags = updateFlagsForApplication(flags, userId);
+ 
+         if (!isRecentsAccessingChildProfiles(Binder.getCallingUid(), userId)) {
+@@ -1008,6 +1018,64 @@ public class ComputerEngine implements Computer {
+ 
+         return getApplicationInfoInternalBody(packageName, flags, filterCallingUid, userId);
+     }
++    
++     private boolean canHideApp(int callingUid, String packageName) {
++        if (!isBootCompleted() || mContext == null || mContext.getPackageManager() == null) {
++            return false;
++        }
++
++        String callingPackage = mContext.getPackageManager().getNameForUid(callingUid);
++
++        if (callingPackage == null || TextUtils.isEmpty(callingPackage)) {
++            return false;
++        }
++
++        // app can be always hidden if calling package is play store
++        boolean isFinsky = callingPackage.contains("com.android.vending");
++
++        if (isFinsky) return true;
++        
++        if (packageName == null || TextUtils.isEmpty(packageName)) {
++            return false;
++        }
++        
++        // the calling package is itself, no need to hide
++        if (callingPackage.contains(packageName)) return false;
++
++        // we only want to hide these apps from playstore 
++        // to avoid these apps from being updated, so abort if
++        // calling package is not finsky
++        if (packageName.contains("youtube") 
++            || packageName.contains("microg")
++            || packageName.contains("revanced")
++            || packageName.contains("gms")) {
++            return false;
++        }
++
++        // this is for banking apps, but we need to make sure first that 
++        // we arent hiding app infos from sandbox/system processes
++        return !isCallerSystem(callingUid) 
++            && !Process.isIsolated(callingUid)
++            && !Process.isSdkSandboxUid(callingUid);
++    }
++    
++    public ParceledListSlice<PackageInfo> recreatePackageList(
++            int callingUid, Context context, int userId, ParceledListSlice<PackageInfo> list) {
++        List<PackageInfo> appList = new ArrayList<>(list.getList());
++        if (!canHideApp(callingUid, null)) return new ParceledListSlice<>(appList);
++        Set<String> hiddenApps = HideAppListUtils.getApps(context);
++        appList.removeIf(info -> hiddenApps.contains(info.packageName));
++        return new ParceledListSlice<>(appList);
++    }
++
++    public List<ApplicationInfo> recreateApplicationList(
++            int callingUid, Context context, int userId, List<ApplicationInfo> list) {
++        List<ApplicationInfo> appList = new ArrayList<>(list);
++        if (!canHideApp(callingUid, null)) return appList;
++        Set<String> hiddenApps = HideAppListUtils.getApps(context);
++        appList.removeIf(info -> hiddenApps.contains(info.packageName));
++        return appList;
++    }
+ 
+     protected ApplicationInfo getApplicationInfoInternalBody(String packageName,
+             @PackageManager.ApplicationInfoFlagsBits long flags,
+@@ -1648,6 +1716,10 @@ public class ComputerEngine implements Computer {
+ 
+     public final PackageInfo getPackageInfo(String packageName,
+             @PackageManager.PackageInfoFlagsBits long flags, int userId) {
++        if (canHideApp(Binder.getCallingUid(), packageName) &&
++            HideAppListUtils.shouldHideAppList(mContext, packageName)) {
++            return null;
++        }
+         return getPackageInfoInternal(packageName, PackageManager.VERSION_CODE_HIGHEST,
+                 flags, Binder.getCallingUid(), userId);
+     }
+@@ -1771,7 +1843,8 @@ public class ComputerEngine implements Computer {
+         enforceCrossUserPermission(callingUid, userId, false /* requireFullPermission */,
+                 false /* checkShell */, "get installed packages");
+ 
+-        return getInstalledPackagesBody(flags, userId, callingUid);
++        return recreatePackageList(callingUid, mContext,
++                        userId, getInstalledPackagesBody(flags, userId, callingUid));
+     }
+ 
+     protected ParceledListSlice<PackageInfo> getInstalledPackagesBody(long flags, int userId,
+@@ -2573,6 +2646,66 @@ public class ComputerEngine implements Computer {
+         }
+     }
+ 
++    private static boolean isBootCompleted() {
++        return android.os.SystemProperties.getBoolean("sys.boot_completed", false);
++    }
++
++    /**
++     * Returns whether caller is home.
++     */
++    private final boolean isCallerHome(int callingUid, int userId) {
++        final String home = mDefaultAppProvider.getDefaultHome(userId);
++        if (home == null) return false;
++        return isCallerSameApp(home, callingUid);
++    }
++
++    /**
++     * Returns whether caller is system, root, shell, or updated system app.
++     */
++    private final boolean isCallerSystem(int callingUid) {
++        if (isSystemOrRootOrShell(callingUid)) {
++            return true;
++        }
++        final SettingBase callingPs = mSettings.getSettingBase(UserHandle.getAppId(callingUid));
++        if (callingPs == null) return false;
++        final int callingFlags = callingPs.getFlags();
++        if (((callingFlags & ApplicationInfo.FLAG_SYSTEM) == ApplicationInfo.FLAG_SYSTEM)
++                || ((callingFlags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)
++                        == ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) {
++            return true;
++        }
++        return false;
++    }
++
++    private final boolean shouldFilterApplicationCustom(
++            @Nullable PackageStateInternal ps, int callingUid, int userId) {
++        if (!isBootCompleted()) return false;
++        if (ps == null) return false;
++
++        final String packageName = ps.getPackageName();
++        if (packageName == null) return false;
++
++        // if the target and caller are the same application, skip
++        if (isCallerSameApp(packageName, callingUid)
++                // if the caller is system, root, shell, or updated system app, skip
++                || isCallerSystem(callingUid)
++                // if the caller is the current default home, skip
++                || isCallerHome(callingUid, userId)) {
++            return false;
++        }
++        // if the target is hidden app, do filter
++        if (ps.getUserStateOrDefault(userId).isHidden()) {
++            return true;
++        }
++        // if the target is included in Settings.Secure.HIDE_APPLIST, do filter
++        if (canHideApp(Binder.getCallingUid(), packageName) && HideAppListUtils.shouldHideAppList(
++                mContext, packageName)) {
++            return true;
++        }
++
++        return false;
++    }
++
+     /**
+      * Returns whether or not access to the application should be filtered.
+      * <p>
+@@ -2600,6 +2733,9 @@ public class ComputerEngine implements Computer {
+         final boolean callerIsInstantApp = instantAppPkgName != null;
+         final boolean packageArchivedForUser = ps != null && PackageArchiver.isArchived(
+                 ps.getUserStateOrDefault(userId));
++        if (shouldFilterApplicationCustom(ps, callingUid, userId)) {
++            return true;
++        }
+         // Don't treat hiddenUntilInstalled as an uninstalled state, phone app needs to access
+         // these hidden application details to customize carrier apps. Also, allowing the system
+         // caller accessing to application across users.
+@@ -4758,7 +4894,7 @@ public class ComputerEngine implements Computer {
+             }
+         }
+ 
+-        return list;
++        return recreateApplicationList(callingUid, mContext, userId, list);
+     }
+ 
+     @Nullable
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 1988686b6b0f..5023536ddc18 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -2865,6 +2865,8 @@ public final class SystemServer implements Dumpable {
+                 t.traceEnd();
+             }
+ 
++            mSystemServiceManager.startService(HideAppListService.class);
++
+             // AttestationService
+             t.traceBegin("AttestationService");
+             mSystemServiceManager.startService(AttestationService.class);
+-- 
+2.43.0
+

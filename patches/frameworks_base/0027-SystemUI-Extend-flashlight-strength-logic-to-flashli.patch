@@ -1,0 +1,680 @@
+From 4637133a3d60afcc8104b8153045500c89f9d3fb Mon Sep 17 00:00:00 2001
+From: Abhay Singh Gill <abhaygill017@gmail.com>
+Date: Fri, 19 Sep 2025 18:26:10 +0530
+Subject: [PATCH 27/37] SystemUI: Extend flashlight strength logic to
+ flashlight controller
+
+Previously the flashlight strength was only applied when toggling it from the QS tile, now it works from other SystemUI components as well.
+
+Change-Id: I2ad19ccc9a272c53f3e61ab4f9919b391e8012e6
+Signed-off-by: Abhay Singh Gill <abhaygill017@gmail.com>
+---
+ .../FlashlightQuickAffordanceConfig.kt        |   2 +
+ .../systemui/qs/tiles/FlashlightTile.java     | 143 ++--------------
+ .../tiles/dialog/FlashlightDialogDelegate.kt  |  76 +--------
+ .../FlashlightTileDataInteractor.kt           |   1 +
+ .../policy/FlashlightController.java          |  10 ++
+ .../policy/FlashlightControllerImpl.java      | 159 +++++++++++++++++-
+ 6 files changed, 189 insertions(+), 202 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/FlashlightQuickAffordanceConfig.kt b/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/FlashlightQuickAffordanceConfig.kt
+index 683c11a88b89..bfcc47c1dbb6 100644
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/FlashlightQuickAffordanceConfig.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/data/quickaffordance/FlashlightQuickAffordanceConfig.kt
+@@ -116,6 +116,8 @@ constructor(
+                             TAG,
+                         )
+                     }
++
++                    override fun onFlashlightStrengthChanged(level: Int) {}
+                 }
+ 
+             flashlightController.addCallback(flashlightCallback)
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+index ffea4ba49547..ec7e200cf2ef 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+@@ -16,20 +16,11 @@
+ 
+ package com.android.systemui.qs.tiles;
+ 
+-import android.annotation.NonNull;
+ import android.app.ActivityManager;
+-import android.content.Context;
+ import android.content.Intent;
+-import android.database.ContentObserver;
+-import android.hardware.camera2.CameraAccessException;
+-import android.hardware.camera2.CameraCharacteristics;
+-import android.hardware.camera2.CameraManager;
+-import android.net.Uri;
+ import android.os.Handler;
+ import android.os.Looper;
+-import android.os.UserHandle;
+ import android.provider.MediaStore;
+-import android.provider.Settings;
+ import android.service.quicksettings.Tile;
+ import android.widget.Switch;
+ 
+@@ -72,20 +63,8 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+     private final FlashlightController mFlashlightController;
+ 
+     private final Handler mHandler;
+-    private final Looper mBgLooper;
+     private final Provider<FlashlightDialogDelegate> mFlashlightDialogProvider;
+     private final DialogTransitionAnimator mDialogTransitionAnimator;
+-    private final ContentObserver mBrightnessObserver;
+-    private final boolean mStrengthControlSupported;
+-
+-    private CameraManager mCameraManager;
+-
+-    private int mDefaultLevel;
+-    private int mMaxLevel;
+-    private float mCurrentPercent;
+-    private int mCurrentLevel;
+-
+-    @Nullable private String mCameraId; 
+ 
+     @Inject
+     public FlashlightTile(
+@@ -105,38 +84,15 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         super(host, uiEventLogger, backgroundLooper, mainHandler, falsingManager, metricsLogger,
+                 statusBarStateController, activityStarter, qsLogger);
+         mHandler = mainHandler;
+-        mBgLooper = backgroundLooper;
+         mFlashlightController = flashlightController;
+         mFlashlightController.observe(getLifecycle(), this);
+         mFlashlightDialogProvider = flashlightDialogDelegateProvider;
+         mDialogTransitionAnimator = dialogTransitionAnimator;
+-
+-        mBrightnessObserver = new ContentObserver(new Handler(mBgLooper)) {
+-            @Override
+-            public void onChange(boolean selfChange, @Nullable Uri uri) {
+-                super.onChange(selfChange, uri);
+-                refreshState();
+-            }
+-        };
+-
+-        mStrengthControlSupported = isStrengthControlSupported();
+-        if (mStrengthControlSupported) {
+-            mContext.getContentResolver().registerContentObserver(
+-                    Settings.System.getUriFor(FLASHLIGHT_BRIGHTNESS_SETTING),
+-                    false,
+-                    mBrightnessObserver
+-            );
+-            getCameraManager().registerTorchCallback(mTorchCallback, new Handler(mBgLooper));
+-        }
+     }
+ 
+     @Override
+     protected void handleDestroy() {
+         super.handleDestroy();
+-        if (mStrengthControlSupported) {
+-            mContext.getContentResolver().unregisterContentObserver(mBrightnessObserver);
+-            getCameraManager().unregisterTorchCallback(mTorchCallback);
+-        }
+     }
+ 
+     @Override
+@@ -166,13 +122,11 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+             return;
+         }
+ 
+-        if (mStrengthControlSupported) {
++        if (mFlashlightController.isStrengthControlSupported()) {
+             Runnable runnable = new Runnable() {
+                 @Override
+                 public void run() {
+-                    SystemUIDialog dialog = mFlashlightDialogProvider.get()
+-                            .setCameraInfo(mCameraId, mMaxLevel, mDefaultLevel)
+-                            .createDialog();
++                    SystemUIDialog dialog = mFlashlightDialogProvider.get().createDialog();
+                     if (expandable != null) {
+                         DialogTransitionAnimator.Controller controller =
+                                 expandable.dialogTransitionController(
+@@ -203,16 +157,7 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         }
+         boolean newState = !mState.value;
+         refreshState(newState);
+-        
+-        if (mStrengthControlSupported && newState) {
+-            try {
+-                int level = Math.max((int) (mCurrentPercent * mMaxLevel), 1);
+-                mCameraManager.turnOnTorchWithStrengthLevel(mCameraId, level);
+-            } catch (CameraAccessException e) {
+-            }
+-        } else {
+-            mFlashlightController.setFlashlight(newState);
+-        }
++        mFlashlightController.setFlashlight(newState);
+     }
+ 
+     @Override
+@@ -230,7 +175,7 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         state.label = mHost.getContext().getString(R.string.quick_settings_flashlight_label);
+         state.secondaryLabel = "";
+         state.stateDescription = "";
+-        state.handlesSecondaryClick = mStrengthControlSupported;
++        state.handlesSecondaryClick = mFlashlightController.isStrengthControlSupported();
+         if (!mFlashlightController.isAvailable()) {
+             state.secondaryLabel = mContext.getString(
+                     R.string.quick_settings_flashlight_camera_in_use);
+@@ -239,19 +184,12 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+             state.icon = maybeLoadResourceIcon(R.drawable.qs_flashlight_icon_off);
+             return;
+         }
+-        if (mStrengthControlSupported) {
++        if (mFlashlightController.isStrengthControlSupported()) {
+             boolean enabled = mFlashlightController.isEnabled();
+-            mCurrentPercent = Settings.System.getFloatForUser(
+-                    mContext.getContentResolver(),
+-                    FLASHLIGHT_BRIGHTNESS_SETTING,
+-                    (float) mDefaultLevel / (float) mMaxLevel,
+-                    UserHandle.USER_CURRENT
+-            );
++            float percent = mFlashlightController.getCurrentPercent();
+ 
+-            mCurrentPercent = Math.max(0.01f, mCurrentPercent);
+-            
+             if (enabled) {
+-                state.secondaryLabel = Math.round(mCurrentPercent * 100f) + "%";
++                state.secondaryLabel = Math.round(percent * 100f) + "%";
+                 state.stateDescription = state.secondaryLabel;
+             }
+         }
+@@ -291,69 +229,8 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         refreshState();
+     }
+ 
+-    private final CameraManager.TorchCallback mTorchCallback = new CameraManager.TorchCallback() {
+-        @Override
+-        public void onTorchStrengthLevelChanged(@NonNull String cameraId, int newStrengthLevel) {
+-            if (!cameraId.equals(mCameraId)) {
+-                return;
+-            }
+-
+-            if (mCurrentLevel == newStrengthLevel) {
+-                return;
+-            }
+-
+-            mCurrentLevel = newStrengthLevel;
+-            mCurrentPercent = Math.max(0.01f, ((float) mCurrentLevel) / ((float) mMaxLevel));
+-            Settings.System.putFloatForUser(
+-                    mContext.getContentResolver(),
+-                    FLASHLIGHT_BRIGHTNESS_SETTING,
+-                    mCurrentPercent,
+-                    UserHandle.USER_CURRENT);
+-            refreshState(true);
+-        }
+-    };
+-
+-    private CameraManager getCameraManager() {
+-        if (mCameraManager == null) {
+-            mCameraManager = (CameraManager) mContext.getApplicationContext()
+-                    .getSystemService(Context.CAMERA_SERVICE);
+-        }
+-        return mCameraManager;
+-    }
+-
+-    private String getCameraId(CameraManager cm) throws CameraAccessException {
+-        String[] ids = cm.getCameraIdList();
+-        for (String id : ids) {
+-            CameraCharacteristics c = cm.getCameraCharacteristics(id);
+-            Boolean flashAvailable = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+-            Integer lensFacing = c.get(CameraCharacteristics.LENS_FACING);
+-            if (flashAvailable != null
+-                    && flashAvailable
+-                    && lensFacing != null
+-                    && lensFacing == CameraCharacteristics.LENS_FACING_BACK) {
+-                return id;
+-            }
+-        }
+-        return null;
+-    }
+-
+-    private boolean isStrengthControlSupported() {
+-        CameraManager cm = getCameraManager();
+-        if (cm == null) return false;
+-
+-        try {
+-            mCameraId = getCameraId(cm);
+-            if (mCameraId != null) {
+-                CameraCharacteristics c = cm.getCameraCharacteristics(mCameraId);
+-                Boolean flashAvailable = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+-                mDefaultLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL);
+-                mMaxLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
+-                // Use the same logic as the old implementation: mMaxLevel > 1
+-                if (flashAvailable && mMaxLevel > 1) {
+-                    return true;
+-                }
+-            }
+-        } catch (CameraAccessException e) {}
+-        return false;
++    @Override
++    public void onFlashlightStrengthChanged(int level) {
++        refreshState();
+     }
+ }
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+index 0934062c105a..30e919babcba 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+@@ -17,15 +17,9 @@
+ package com.android.systemui.qs.tiles.dialog
+ 
+ import android.content.Context
+-import android.hardware.camera2.CameraAccessException
+-import android.hardware.camera2.CameraCharacteristics
+-import android.hardware.camera2.CameraManager
+ import android.os.Bundle
+-import android.os.UserHandle
+ import android.os.VibrationEffect
+ import android.os.Vibrator
+-import android.provider.Settings
+-import android.util.Log
+ import android.widget.Button
+ import android.widget.FrameLayout
+ import android.view.ContextThemeWrapper
+@@ -50,13 +44,6 @@ class FlashlightDialogDelegate @Inject constructor(
+ 
+     private lateinit var slider: Slider
+ 
+-    private val cameraManager: CameraManager?
+-        get() = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
+-    private var cameraId: String? = null
+-    private var maxLevel: Int = 1
+-    private var defaultLevel: Int = 1
+-    private var currentPercent: Float = 1f
+-
+     private val vibrator = context.getSystemService(Vibrator::class.java)
+     private val flashlightMoveHaptic: VibrationEffect =
+         VibrationEffect.get(VibrationEffect.EFFECT_TICK)
+@@ -88,20 +75,8 @@ class FlashlightDialogDelegate @Inject constructor(
+                 R.string.flashlight_strength_turn_on,
+             { _, _ ->
+                 val newState = !flashlightController.isEnabled()
+-                if (newState) {
+-                    val level = (currentPercent * maxLevel).toInt()
+-                    val safeLevel = maxOf(level, 1)
+-                    cameraId?.let { id ->
+-                        try {
+-                            cameraManager?.turnOnTorchWithStrengthLevel(id, safeLevel)
+-                        } catch (_: CameraAccessException) {}
+-                    }
+-                } else {
+-                    flashlightController.setFlashlight(false)
+-                }
+-
++                flashlightController.setFlashlight(newState)
+                 slider.isEnabled = newState
+-
+                 dialog.getButton(SystemUIDialog.BUTTON_NEUTRAL)?.text =
+                     if (newState)
+                         dialog.context.getString(R.string.flashlight_strength_turn_off)
+@@ -113,65 +88,32 @@ class FlashlightDialogDelegate @Inject constructor(
+     }
+ 
+     override fun onCreate(dialog: SystemUIDialog, savedInstanceState: Bundle?) {
+-        val defaultPercent = defaultLevel.toFloat() / maxLevel.toFloat()
+-        currentPercent = Settings.System.getFloatForUser(
+-            dialog.context.contentResolver,
+-            FLASHLIGHT_BRIGHTNESS_SETTING,
+-            defaultPercent,
+-            UserHandle.USER_CURRENT
+-        )
++        val maxLevel = flashlightController.getMaxLevel()
++        val currentPercent = flashlightController.getCurrentPercent()
+ 
+         slider.isEnabled = flashlightController.isEnabled()
+         slider.valueFrom = 1f
+         slider.valueTo = 100f
+         slider.value = (currentPercent * 100f).coerceAtLeast(1f)
+-        slider.setLabelFormatter { value ->
+-            value.toInt().toString()
+-        }
++        slider.setLabelFormatter { value -> value.toInt().toString() }
+ 
+         var last = -1
+         slider.addOnChangeListener { _, value, fromUser ->
+             if (fromUser) {
+-                val percent = (value / 100f)
++                val percent = value / 100f
+                 val p = Math.round(percent * 100)
+                 if (p != last) {
+                     vibrator?.vibrate(flashlightMoveHaptic)
+                     last = p
+                 }
+-                currentPercent = percent
+-                updateFlashlightStrength()
++                updateFlashlightStrength(percent, maxLevel)
+             }
+         }
+     }
+ 
+     @MainThread
+-    private fun updateFlashlightStrength() {
+-        Settings.System.putFloatForUser(
+-            context.contentResolver,
+-            FLASHLIGHT_BRIGHTNESS_SETTING,
+-            currentPercent,
+-            UserHandle.USER_CURRENT
+-        )
+-
+-        if (cameraId != null) {
+-            try {
+-                val level = (currentPercent * maxLevel).toInt().coerceAtLeast(1)
+-                cameraManager?.turnOnTorchWithStrengthLevel(cameraId!!, level)
+-            } catch (e: CameraAccessException) {
+-                Log.e(TAG, "Unable to set torch strength", e)
+-            }
+-        }
+-    }
+-
+-    fun setCameraInfo(camId: String?, maxLvl: Int, defLvl: Int): FlashlightDialogDelegate {
+-        cameraId = camId
+-        maxLevel = maxLvl
+-        defaultLevel = defLvl
+-        return this
+-    }
+-
+-    companion object {
+-        private const val TAG = "FlashlightDialogDelegate"
+-        private const val FLASHLIGHT_BRIGHTNESS_SETTING = "flashlight_brightness"
++    private fun updateFlashlightStrength(percent: Float, maxLevel: Int) {
++        val level = (percent * maxLevel).toInt().coerceAtLeast(1)
++        flashlightController.setFlashlightStrengthLevel(level)
+     }
+ }
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/impl/flashlight/domain/interactor/FlashlightTileDataInteractor.kt b/packages/SystemUI/src/com/android/systemui/qs/tiles/impl/flashlight/domain/interactor/FlashlightTileDataInteractor.kt
+index 2fd2486a47c3..ab2bb5baa2b4 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/impl/flashlight/domain/interactor/FlashlightTileDataInteractor.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/impl/flashlight/domain/interactor/FlashlightTileDataInteractor.kt
+@@ -70,6 +70,7 @@ constructor(
+                                 else FlashlightModel.Unavailable.Temporarily.CameraInUse
+                             )
+                         }
++			override fun onFlashlightStrengthChanged(level: Int) {}
+                     }
+                 flashlightController.addCallback(callback)
+                 awaitClose { flashlightController.removeCallback(callback) }
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightController.java b/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightController.java
+index dc1b27cfb1f2..a3746c7cf8f5 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightController.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightController.java
+@@ -25,6 +25,13 @@ public interface FlashlightController extends CallbackController<FlashlightListe
+     boolean isAvailable();
+     boolean isEnabled();
+ 
++    boolean isStrengthControlSupported();
++    int getMaxLevel();
++    int getDefaultLevel();
++    int getCurrentLevel();
++    float getCurrentPercent();
++    void setFlashlightStrengthLevel(int level);
++
+     @WeaklyReferencedCallback
+     public interface FlashlightListener {
+ 
+@@ -45,5 +52,8 @@ public interface FlashlightController extends CallbackController<FlashlightListe
+          * @param available true if the flashlight is currently available.
+          */
+         void onFlashlightAvailabilityChanged(boolean available);
++
++        /** Called when the flashlight strength changes (if supported). */
++        void onFlashlightStrengthChanged(int level);
+     }
+ }
+diff --git a/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightControllerImpl.java b/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightControllerImpl.java
+index 615cc74ef5e4..dda43180f1c9 100644
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightControllerImpl.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/policy/FlashlightControllerImpl.java
+@@ -17,10 +17,13 @@
+ package com.android.systemui.statusbar.policy;
+ 
+ import android.annotation.WorkerThread;
++import android.content.Context;
+ import android.content.pm.PackageManager;
+ import android.hardware.camera2.CameraAccessException;
+ import android.hardware.camera2.CameraCharacteristics;
+ import android.hardware.camera2.CameraManager;
++import android.os.Handler;
++import android.os.UserHandle;
+ import android.provider.Settings;
+ import android.provider.Settings.Secure;
+ import android.text.TextUtils;
+@@ -32,6 +35,7 @@ import com.android.internal.annotations.GuardedBy;
+ import com.android.systemui.broadcast.BroadcastSender;
+ import com.android.systemui.dagger.SysUISingleton;
+ import com.android.systemui.dagger.qualifiers.Background;
++import com.android.systemui.dagger.qualifiers.Main;
+ import com.android.systemui.dump.DumpManager;
+ import com.android.systemui.util.settings.SecureSettings;
+ 
+@@ -56,11 +60,14 @@ public class FlashlightControllerImpl implements FlashlightController {
+     private static final int DISPATCH_ERROR = 0;
+     private static final int DISPATCH_CHANGED = 1;
+     private static final int DISPATCH_AVAILABILITY_CHANGED = 2;
++    private static final int DISPATCH_STRENGTH_CHANGED = 3;
+ 
+     private static final String ACTION_FLASHLIGHT_CHANGED =
+         "com.android.settings.flashlight.action.FLASHLIGHT_CHANGED";
+ 
++    private final Context mContext;
+     private final CameraManager mCameraManager;
++    private final Handler mHandler;
+     private final Executor mExecutor;
+     private final SecureSettings mSecureSettings;
+     private final DumpManager mDumpManager;
+@@ -79,16 +86,31 @@ public class FlashlightControllerImpl implements FlashlightController {
+     private final AtomicReference<String> mCameraId;
+     private final AtomicBoolean mInitted = new AtomicBoolean(false);
+ 
++    private static final String FLASHLIGHT_BRIGHTNESS_SETTING = "flashlight_brightness";
++
++    @GuardedBy("this")
++    private int mDefaultLevel;
++    @GuardedBy("this")
++    private int mMaxLevel;
++    @GuardedBy("this")
++    private int mCurrentLevel;
++    @GuardedBy("this")
++    private boolean mStrengthControlSupported;
++
+     @Inject
+     public FlashlightControllerImpl(
++            Context context,
+             DumpManager dumpManager,
+             CameraManager cameraManager,
++            @Main Handler mainHandler,
+             @Background Executor bgExecutor,
+             SecureSettings secureSettings,
+             BroadcastSender broadcastSender,
+             PackageManager packageManager
+     ) {
++        mContext = context;
+         mCameraManager = cameraManager;
++        mHandler = mainHandler;
+         mExecutor = bgExecutor;
+         mCameraId = new AtomicReference<>(null);
+         mSecureSettings = secureSettings;
+@@ -110,7 +132,29 @@ public class FlashlightControllerImpl implements FlashlightController {
+     private void tryInitCamera() {
+         if (!mHasFlashlight || mCameraId.get() != null) return;
+         try {
+-            mCameraId.set(getCameraId());
++            String id = getCameraId();
++            if (id != null) {
++                CameraCharacteristics c = mCameraManager.getCameraCharacteristics(id);
++                Boolean flashAvailable = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
++                if (flashAvailable != null && flashAvailable) {
++                    mDefaultLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL);
++                    mMaxLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
++                    mStrengthControlSupported = (mMaxLevel > 1);
++                    mCameraId.set(id);
++
++                    if (mStrengthControlSupported) {
++                        float percent = Settings.System.getFloatForUser(
++                                mContext.getContentResolver(),
++                                FLASHLIGHT_BRIGHTNESS_SETTING,
++                                (float) mDefaultLevel / mMaxLevel,
++                                UserHandle.USER_CURRENT);
++                        synchronized (this) {
++                            mCurrentLevel = Math.max(1, Math.round(percent * mMaxLevel));
++                        }
++                        if (DEBUG) Log.d(TAG, "Restored torch level: " + mCurrentLevel);
++                    }
++                }
++            }
+         } catch (Throwable e) {
+             Log.e(TAG, "Couldn't initialize.", e);
+             return;
+@@ -131,7 +175,20 @@ public class FlashlightControllerImpl implements FlashlightController {
+             synchronized (this) {
+                 if (mFlashlightEnabled != enabled) {
+                     try {
+-                        mCameraManager.setTorchMode(mCameraId.get(), enabled);
++                        if (enabled) {
++                            if (mStrengthControlSupported) {
++                                int level = (mCurrentLevel > 0) ? mCurrentLevel : mDefaultLevel;
++                                level = Math.max(1, Math.min(level, mMaxLevel));
++                                if (DEBUG) Log.d(TAG, "Turning on torch with level " + level);
++                                mCameraManager.turnOnTorchWithStrengthLevel(mCameraId.get(), level);
++                            } else {
++                                if (DEBUG) Log.d(TAG, "Turning on torch (no strength support)");
++                                mCameraManager.setTorchMode(mCameraId.get(), true);
++                            }
++                        } else {
++                            if (DEBUG) Log.d(TAG, "Turning off torch");
++                            mCameraManager.setTorchMode(mCameraId.get(), false);
++                        }
+                     } catch (CameraAccessException e) {
+                         Log.e(TAG, "Couldn't set torch mode", e);
+                         dispatchError();
+@@ -153,6 +210,74 @@ public class FlashlightControllerImpl implements FlashlightController {
+         return mTorchAvailable;
+     }
+ 
++    public boolean isStrengthControlSupported() {
++        return mStrengthControlSupported;
++    }
++
++    public int getMaxLevel() {
++        return mMaxLevel;
++    }
++
++    public int getDefaultLevel() {
++        return mDefaultLevel;
++    }
++
++    public synchronized int getCurrentLevel() {
++        return mCurrentLevel;
++    }
++
++    public synchronized float getCurrentPercent() {
++        if (!mStrengthControlSupported || mMaxLevel <= 0) {
++            return 0f;
++        }
++        return Math.max(0.01f, (float) mCurrentLevel / (float) mMaxLevel);
++    }
++
++    public void setFlashlightStrengthLevel(int level) {
++        if (!mStrengthControlSupported) {
++            setFlashlight(level > 0);
++            return;
++        }
++        if (mCameraId.get() == null) {
++            mExecutor.execute(this::tryInitCamera);
++        }
++
++        final int requestedLevel = level;
++
++        mHandler.post(() -> {
++            if (mCameraId.get() == null) return;
++
++            int clampedLevel;
++            synchronized (this) {
++                clampedLevel = Math.max(1, Math.min(requestedLevel, mMaxLevel));
++                if (mCurrentLevel == clampedLevel) return;
++                mCurrentLevel = clampedLevel;
++            }
++
++            try {
++                if (DEBUG) Log.d(TAG, "Setting torch strength level: " + clampedLevel);
++                mCameraManager.turnOnTorchWithStrengthLevel(mCameraId.get(), clampedLevel);
++
++                dispatchStrengthChanged(clampedLevel);
++
++                mExecutor.execute(() -> {
++                    float percent = Math.max(0.01f, (float) clampedLevel / mMaxLevel);
++                    Settings.System.putFloatForUser(
++                            mContext.getContentResolver(),
++                            FLASHLIGHT_BRIGHTNESS_SETTING,
++                            percent,
++                            UserHandle.USER_CURRENT
++                    );
++                });
++
++            } catch (CameraAccessException e) {
++                Log.e(TAG, "Couldn't set torch strength level", e);
++                dispatchError();
++            }
++        });
++    }
++
++
+     @Override
+     public void addCallback(@NonNull FlashlightListener l) {
+         synchronized (mListeners) {
+@@ -163,6 +288,7 @@ public class FlashlightControllerImpl implements FlashlightController {
+             mListeners.add(new WeakReference<>(l));
+             l.onFlashlightAvailabilityChanged(isAvailable());
+             l.onFlashlightChanged(isEnabled());
++            l.onFlashlightStrengthChanged(getCurrentLevel());
+         }
+     }
+ 
+@@ -200,6 +326,17 @@ public class FlashlightControllerImpl implements FlashlightController {
+         dispatchListeners(DISPATCH_AVAILABILITY_CHANGED, available);
+     }
+ 
++    private void dispatchStrengthChanged(int level) {
++        synchronized (mListeners) {
++            for (WeakReference<FlashlightListener> ref : mListeners) {
++                FlashlightListener l = ref.get();
++                if (l != null) {
++                    l.onFlashlightStrengthChanged(level);
++                }
++            }
++        }
++    }
++
+     private void dispatchListeners(int message, boolean argument) {
+         synchronized (mListeners) {
+             final ArrayList<WeakReference<FlashlightController.FlashlightListener>> copy =
+@@ -259,6 +396,24 @@ public class FlashlightControllerImpl implements FlashlightController {
+             }
+         }
+ 
++        @Override
++        @WorkerThread
++        public void onTorchStrengthLevelChanged(@NonNull String cameraId, int newStrengthLevel) {
++            if (!TextUtils.equals(cameraId, mCameraId.get())) return;
++            synchronized (FlashlightControllerImpl.this) {
++                if (mCurrentLevel == newStrengthLevel) return;
++                mCurrentLevel = newStrengthLevel;
++            }
++            float percent = Math.max(0.01f, (float) newStrengthLevel / (float) mMaxLevel);
++            Settings.System.putFloatForUser(
++                    mContext.getContentResolver(),
++                    FLASHLIGHT_BRIGHTNESS_SETTING,
++                    percent,
++                    UserHandle.USER_CURRENT);
++            if (DEBUG) Log.d(TAG, "Strength level changed: " + newStrengthLevel + "/" + mMaxLevel);
++            dispatchStrengthChanged(newStrengthLevel);
++        }
++
+         private void setCameraAvailable(boolean available) {
+             boolean changed;
+             synchronized (FlashlightControllerImpl.this) {
+-- 
+2.43.0
+
