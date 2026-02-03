@@ -1,0 +1,69 @@
+From 6acd951e8e48765dbb9ced02cade0e76c648b803 Mon Sep 17 00:00:00 2001
+From: John Galt <johngaltfirstrun@gmail.com>
+Date: Mon, 29 Dec 2025 14:02:57 -0500
+Subject: [PATCH 37/39] SystemUI: make flashlight tile use real levels
+
+Change-Id: Ifb4173b735e39be3950b9f51b64ecefc5b6ac96a
+---
+ .../tiles/dialog/FlashlightDialogDelegate.kt  | 24 ++++++++++---------
+ 1 file changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+index 30e919babcba..1b3a95ac00e9 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+@@ -24,6 +24,7 @@ import android.widget.Button
+ import android.widget.FrameLayout
+ import android.view.ContextThemeWrapper
+ import android.view.Gravity
++import kotlin.math.roundToInt
+ import androidx.annotation.MainThread
+ import com.android.systemui.dagger.qualifiers.Background
+ import com.android.systemui.dagger.qualifiers.Main
+@@ -89,31 +90,32 @@ class FlashlightDialogDelegate @Inject constructor(
+ 
+     override fun onCreate(dialog: SystemUIDialog, savedInstanceState: Bundle?) {
+         val maxLevel = flashlightController.getMaxLevel()
++        val numLevels = maxLevel.coerceAtLeast(1)
+         val currentPercent = flashlightController.getCurrentPercent()
+ 
+         slider.isEnabled = flashlightController.isEnabled()
+         slider.valueFrom = 1f
+-        slider.valueTo = 100f
+-        slider.value = (currentPercent * 100f).coerceAtLeast(1f)
+-        slider.setLabelFormatter { value -> value.toInt().toString() }
++        slider.valueTo = numLevels.toFloat()
++        slider.stepSize = 1f
++        slider.value = ((currentPercent * numLevels).roundToInt()).coerceIn(1, numLevels).toFloat()
++        slider.setLabelFormatter { value ->
++            ((value / numLevels) * 100).roundToInt().coerceIn(0, 100).toString() + "%" }
+ 
+-        var last = -1
++        var lastLevel = -1
+         slider.addOnChangeListener { _, value, fromUser ->
+             if (fromUser) {
+-                val percent = value / 100f
+-                val p = Math.round(percent * 100)
+-                if (p != last) {
++                val level = value.toInt()
++                if (level != lastLevel) {
+                     vibrator?.vibrate(flashlightMoveHaptic)
+-                    last = p
++                    lastLevel = level
+                 }
+-                updateFlashlightStrength(percent, maxLevel)
++                updateFlashlightStrength(level, maxLevel)
+             }
+         }
+     }
+ 
+     @MainThread
+-    private fun updateFlashlightStrength(percent: Float, maxLevel: Int) {
+-        val level = (percent * maxLevel).toInt().coerceAtLeast(1)
++    private fun updateFlashlightStrength(level: Int, maxLevel: Int) {
+         flashlightController.setFlashlightStrengthLevel(level)
+     }
+ }
+-- 
+2.43.0
+

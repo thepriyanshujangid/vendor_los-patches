@@ -1,0 +1,28 @@
+From eeb4f920939a3282991d468b8d76fef7ee688fec Mon Sep 17 00:00:00 2001
+From: Ashwin Devi Srinivasan <astroashwin@outlook.com>
+Date: Tue, 10 Mar 2026 14:57:02 +0400
+Subject: [PATCH 39/39] SystemUI: conditionally hide ticks on flashlight slider
+
+If there are more than 10 levels, then keep the discrete steps but hide
+the visual tick marks for a more cleaner look.
+
+Change-Id: I3585f62d0126afb00223104192a4cedfcdf13cbe
+---
+ .../android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+index 1a5437381b40..9935465fc2d7 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+@@ -97,6 +97,7 @@ class FlashlightDialogDelegate @Inject constructor(
+         slider.valueFrom = 1f
+         slider.valueTo = numLevels.toFloat()
+         slider.stepSize = 1f
++        slider.setTickVisible(numLevels <= 10)
+         slider.value = ((currentPercent * numLevels).roundToInt()).coerceIn(1, numLevels).toFloat()
+         slider.setLabelFormatter { value ->
+             ((value / numLevels) * 100).roundToInt().coerceIn(0, 100).toString() + "%" }
+-- 
+2.43.0
+

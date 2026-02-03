@@ -1,0 +1,27 @@
+From 5155b14259ea7a85ffdafcd58aa3ee2083ee052a Mon Sep 17 00:00:00 2001
+From: Ashwin Devi Srinivasan <ashwin@ashds.dev>
+Date: Tue, 1 Sep 2026 09:00:25 +0000
+Subject: [PATCH 23/39] AttestationService: Fix NPE when fetching PIF for the
+ first time
+
+Change-Id: I02e13f9429dba1ac11d58a696d31a850154adaf1
+---
+ .../core/java/com/android/server/custom/AttestationService.java | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/custom/AttestationService.java b/services/core/java/com/android/server/custom/AttestationService.java
+index c30210712611..84e170fb816a 100644
+--- a/services/core/java/com/android/server/custom/AttestationService.java
++++ b/services/core/java/com/android/server/custom/AttestationService.java
+@@ -130,7 +130,7 @@ public final class AttestationService extends SystemService {
+                 String savedProps = Settings.Secure.getString(mContext.getContentResolver(), Settings.Secure.FETCHED_PIF);
+                 String props = fetchProps();
+ 
+-                if (props != null && !savedProps.equals(props)) {
++                if (props != null && !props.equals(savedProps)) {
+                     dlog("Found new props");
+                     Settings.Secure.putString(mContext.getContentResolver(), Settings.Secure.FETCHED_PIF, props);
+                     dlog("FetchGmsCertifiedProps completed");
+-- 
+2.43.0
+

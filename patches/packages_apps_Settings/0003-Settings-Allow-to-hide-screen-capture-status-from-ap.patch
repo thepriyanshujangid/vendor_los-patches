@@ -1,0 +1,47 @@
+From b2d5d8c41f9875dae28bef697124af7da248487f Mon Sep 17 00:00:00 2001
+From: someone5678 <someone5678@users.noreply.github.com>
+Date: Tue, 21 May 2024 10:13:17 -0400
+Subject: [PATCH 03/10] Settings: Allow to hide screen capture status from apps
+ [2/2]
+
+* Allow to hide screen capture detection from privacy invasive apps
+
+Change-Id: I82989e03b5e181a8a3fcf797a27a70bfa5fd06d1
+Signed-off-by: someone5678 <someone5678@users.noreply.github.com>
+---
+ res/values/custom_strings.xml              | 5 +++++
+ res/xml/more_security_privacy_settings.xml | 6 ++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/res/values/custom_strings.xml b/res/values/custom_strings.xml
+index 7bb31d4c23e..27b68f51fb0 100644
+--- a/res/values/custom_strings.xml
++++ b/res/values/custom_strings.xml
+@@ -25,4 +25,9 @@
+     <!-- Ignore window secure -->
+     <string name="ignore_window_secure_title">Ignore window secure flags</string>
+     <string name="ignore_window_secure_summary">Remove screenshot and screenrecord limits for all apps. This can be convenient in some cases but may lead to privacy leaks.</string>
++
++    <!-- Hide screen capture status -->
++    <string name="hide_screen_capture_status_title">Hide screen capture status</string>
++    <string name="hide_screen_capture_status_summary">Hide screen capture and screen record status from all applications. Can be convenient in some cases but may lead to privacy leaks. Need to restart applications for the change to take effect.</string>
++
+ </resources>
+diff --git a/res/xml/more_security_privacy_settings.xml b/res/xml/more_security_privacy_settings.xml
+index 39275487d09..d4009e43e07 100644
+--- a/res/xml/more_security_privacy_settings.xml
++++ b/res/xml/more_security_privacy_settings.xml
+@@ -261,4 +261,10 @@
+         android:summary="@string/ignore_window_secure_summary"
+         android:defaultValue="true"/>
+ 
++    <lineageos.preference.GlobalSettingSwitchPreference
++            android:key="hide_screen_capture_status"
++            android:title="@string/hide_screen_capture_status_title"
++            android:summary="@string/hide_screen_capture_status_summary"
++            android:defaultValue="true"/>
++
+ </PreferenceScreen>
+-- 
+2.43.0
+

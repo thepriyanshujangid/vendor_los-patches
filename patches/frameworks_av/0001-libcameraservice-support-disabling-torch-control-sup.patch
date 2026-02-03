@@ -1,0 +1,64 @@
+From 163c70c5ac374cdabdaf2561ae00fa2c8add4588 Mon Sep 17 00:00:00 2001
+From: John Galt <johngaltfirstrun@gmail.com>
+Date: Wed, 6 Aug 2025 12:02:37 -0400
+Subject: [PATCH 1/8] libcameraservice: support disabling torch control support
+
+On some devices such as OnePlus 12, newer blobs have a strange crash
+which is entirely proprietary stacktraced with torch control support,
+and Oplus stock disables in platform.
+
+We previously had a hack to manually implement it in an extension,
+but this device was also the only one that had other issues with it.
+
+Additionally, >2.3 aidl isn't expected to lack this support. So this
+hack simply always uses the same strength (legacy path), and does
+not use torch control.
+
+Change-Id: I593c95f4fb412da8c02fab6d6442ac6ef2416ba3
+Signed-off-by: Pranav Vashi <neobuddy89@gmail.com>
+---
+ services/camera/libcameraservice/Android.bp        | 6 +++++-
+ services/camera/libcameraservice/CameraService.cpp | 6 +++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/services/camera/libcameraservice/Android.bp b/services/camera/libcameraservice/Android.bp
+index 362a390b8f..7a936420ee 100644
+--- a/services/camera/libcameraservice/Android.bp
++++ b/services/camera/libcameraservice/Android.bp
+@@ -243,7 +243,11 @@ cc_library {
+         "-Wextra",
+         "-Werror",
+         "-Wno-ignored-qualifiers",
+-    ],
++    ] + select(soong_config_variable("camera", "disable_torch_control"), {
++        true: ["-DDISABLE_TORCH_CONTROL"],
++        false: [],
++        default: [],
++    }),
+ }
+ 
+ cc_library_static {
+diff --git a/services/camera/libcameraservice/CameraService.cpp b/services/camera/libcameraservice/CameraService.cpp
+index cc7dab4d65..8bb9f3d2ef 100644
+--- a/services/camera/libcameraservice/CameraService.cpp
++++ b/services/camera/libcameraservice/CameraService.cpp
+@@ -3048,11 +3048,15 @@ Status CameraService::turnOnTorchWithStrengthLevel(const std::string& unresolved
+         Mutex::Autolock al(mTorchUidMapMutex);
+         updateTorchUidMapLocked(cameraId, uid);
+     }
++#ifdef DISABLE_TORCH_CONTROL
++    bool shouldSkipTorchStrengthUpdates = false;
++    status_t err = mFlashlight->setTorchMode(cameraId, (torchStrength > 0) ? 1 : 0);
++#else
+     // Check if the current torch strength level is same as the new one.
+     bool shouldSkipTorchStrengthUpdates = mCameraProviderManager->shouldSkipTorchStrengthUpdate(
+             cameraId, torchStrength);
+-
+     status_t err = mFlashlight->turnOnTorchWithStrengthLevel(cameraId, torchStrength);
++#endif
+ 
+     if (err != OK) {
+         int32_t errorCode;
+-- 
+2.43.0
+

@@ -1,0 +1,500 @@
+From 4cbad70f8fd48d9a867e91dcce4a82fe7faf6aa5 Mon Sep 17 00:00:00 2001
+From: Abhay Singh Gill <abhaygill017@gmail.com>
+Date: Sat, 13 Sep 2025 21:32:55 +0530
+Subject: [PATCH 33/39] SystemUI: Add flashlight strength control
+
+The default behaviour is toggling the flashlight since we use secondaryClick as default onClick behaviour on small tiles.
+
+Change-Id: I8da1d9c80cd2209a60cde524aa58bd251610244b
+Signed-off-by: Abhay Singh Gill <abhaygill017@gmail.com>
+---
+ .../SystemUI/res/values/custom_strings.xml    |   7 +-
+ .../systemui/qs/tiles/FlashlightTile.java     | 193 +++++++++++++++++-
+ .../tiles/dialog/FlashlightDialogDelegate.kt  | 177 ++++++++++++++++
+ 3 files changed, 374 insertions(+), 3 deletions(-)
+ create mode 100644 packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+
+diff --git a/packages/SystemUI/res/values/custom_strings.xml b/packages/SystemUI/res/values/custom_strings.xml
+index 2929df162e51..337df6b5a40f 100644
+--- a/packages/SystemUI/res/values/custom_strings.xml
++++ b/packages/SystemUI/res/values/custom_strings.xml
+@@ -20,4 +20,9 @@
+ <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+     <!-- Face unlock -->
+     <string name="face_unlock_recognizing">Recognizing face...</string>
+-</resources>
+\ No newline at end of file
++
++    <!-- Flashlight Strength -->
++    <string name="flashlight_strength_title">Flashlight Strength</string>
++    <string name="flashlight_strength_turn_off">Turn off</string>
++    <string name="flashlight_strength_turn_on">Turn on</string>
++</resources>
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+index 2b127d60b2be..45774b9a3d2c 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+@@ -16,18 +16,30 @@
+ 
+ package com.android.systemui.qs.tiles;
+ 
++import android.annotation.NonNull;
+ import android.app.ActivityManager;
++import android.content.Context;
+ import android.content.Intent;
++import android.database.ContentObserver;
++import android.hardware.camera2.CameraAccessException;
++import android.hardware.camera2.CameraCharacteristics;
++import android.hardware.camera2.CameraManager;
++import android.net.Uri;
+ import android.os.Handler;
+ import android.os.Looper;
++import android.os.UserHandle;
+ import android.provider.MediaStore;
++import android.provider.Settings;
+ import android.service.quicksettings.Tile;
+ import android.widget.Switch;
+ 
+ import androidx.annotation.Nullable;
+ 
++import com.android.internal.jank.InteractionJankMonitor;
+ import com.android.internal.logging.MetricsLogger;
+ import com.android.internal.logging.nano.MetricsProto.MetricsEvent;
++import com.android.systemui.animation.DialogCuj;
++import com.android.systemui.animation.DialogTransitionAnimator;
+ import com.android.systemui.animation.Expandable;
+ import com.android.systemui.dagger.qualifiers.Background;
+ import com.android.systemui.dagger.qualifiers.Main;
+@@ -38,11 +50,14 @@ import com.android.systemui.plugins.statusbar.StatusBarStateController;
+ import com.android.systemui.qs.QSHost;
+ import com.android.systemui.qs.QsEventLogger;
+ import com.android.systemui.qs.logging.QSLogger;
++import com.android.systemui.qs.tiles.dialog.FlashlightDialogDelegate;
+ import com.android.systemui.qs.tileimpl.QSTileImpl;
+ import com.android.systemui.res.R;
++import com.android.systemui.statusbar.phone.SystemUIDialog;
+ import com.android.systemui.statusbar.policy.FlashlightController;
+ 
+ import javax.inject.Inject;
++import javax.inject.Provider;
+ 
+ /**
+  * Quick settings tile: Control flashlight
+@@ -51,8 +66,27 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         FlashlightController.FlashlightListener {
+ 
+     public static final String TILE_SPEC = "flashlight";
++    private static final String FLASHLIGHT_BRIGHTNESS_SETTING = "flashlight_brightness";
++    private static final String INTERACTION_JANK_TAG = "flashlight_strength";
++
+     private final FlashlightController mFlashlightController;
+ 
++    private final Handler mHandler;
++    private final Looper mBgLooper;
++    private final Provider<FlashlightDialogDelegate> mFlashlightDialogProvider;
++    private final DialogTransitionAnimator mDialogTransitionAnimator;
++    private final ContentObserver mBrightnessObserver;
++    private final boolean mStrengthControlSupported;
++
++    private CameraManager mCameraManager;
++
++    private int mDefaultLevel;
++    private int mMaxLevel;
++    private float mCurrentPercent;
++    private int mCurrentLevel;
++
++    @Nullable private String mCameraId; 
++
+     @Inject
+     public FlashlightTile(
+             QSHost host,
+@@ -64,17 +98,45 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+             StatusBarStateController statusBarStateController,
+             ActivityStarter activityStarter,
+             QSLogger qsLogger,
+-            FlashlightController flashlightController
++            FlashlightController flashlightController,
++            Provider<FlashlightDialogDelegate> flashlightDialogDelegateProvider,
++            DialogTransitionAnimator dialogTransitionAnimator
+     ) {
+         super(host, uiEventLogger, backgroundLooper, mainHandler, falsingManager, metricsLogger,
+                 statusBarStateController, activityStarter, qsLogger);
++        mHandler = mainHandler;
++        mBgLooper = backgroundLooper;
+         mFlashlightController = flashlightController;
+         mFlashlightController.observe(getLifecycle(), this);
++        mFlashlightDialogProvider = flashlightDialogDelegateProvider;
++        mDialogTransitionAnimator = dialogTransitionAnimator;
++
++        mBrightnessObserver = new ContentObserver(new Handler(mBgLooper)) {
++            @Override
++            public void onChange(boolean selfChange, @Nullable Uri uri) {
++                super.onChange(selfChange, uri);
++                refreshState();
++            }
++        };
++
++        mStrengthControlSupported = isStrengthControlSupported();
++        if (mStrengthControlSupported) {
++            mContext.getContentResolver().registerContentObserver(
++                    Settings.System.getUriFor(FLASHLIGHT_BRIGHTNESS_SETTING),
++                    false,
++                    mBrightnessObserver
++            );
++            getCameraManager().registerTorchCallback(mTorchCallback, new Handler(mBgLooper));
++        }
+     }
+ 
+     @Override
+     protected void handleDestroy() {
+         super.handleDestroy();
++        if (mStrengthControlSupported) {
++            mContext.getContentResolver().unregisterContentObserver(mBrightnessObserver);
++            getCameraManager().unregisterTorchCallback(mTorchCallback);
++        }
+     }
+ 
+     @Override
+@@ -103,9 +165,54 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         if (ActivityManager.isUserAMonkey()) {
+             return;
+         }
++
++        if (mStrengthControlSupported) {
++            Runnable runnable = new Runnable() {
++                @Override
++                public void run() {
++                    SystemUIDialog dialog = mFlashlightDialogProvider.get()
++                            .setCameraInfo(mCameraId, mMaxLevel, mDefaultLevel)
++                            .createDialog();
++                    if (expandable != null) {
++                        DialogTransitionAnimator.Controller controller =
++                                expandable.dialogTransitionController(
++                                        new DialogCuj(
++                                                InteractionJankMonitor.CUJ_SHADE_DIALOG_OPEN,
++                                                INTERACTION_JANK_TAG));
++                        if (controller != null) {
++                            mDialogTransitionAnimator.show(dialog, controller);
++                        } else {
++                            dialog.show();
++                        }
++                    } else {
++                        dialog.show();
++                    }
++                }
++            };
++
++            mHandler.post(runnable);
++        } else {
++            handleSecondaryClick(expandable);
++        }
++    }
++
++    @Override
++    protected void handleSecondaryClick(@Nullable Expandable expandable) {
++        if (ActivityManager.isUserAMonkey()) {
++            return;
++        }
+         boolean newState = !mState.value;
+         refreshState(newState);
+-        mFlashlightController.setFlashlight(newState);
++        
++        if (mStrengthControlSupported && newState) {
++            try {
++                int level = Math.max((int) (mCurrentPercent * mMaxLevel), 1);
++                mCameraManager.turnOnTorchWithStrengthLevel(mCameraId, level);
++            } catch (CameraAccessException e) {
++            }
++        } else {
++            mFlashlightController.setFlashlight(newState);
++        }
+     }
+ 
+     @Override
+@@ -123,6 +230,7 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+         state.label = mHost.getContext().getString(R.string.quick_settings_flashlight_label);
+         state.secondaryLabel = "";
+         state.stateDescription = "";
++        state.handlesSecondaryClick = mStrengthControlSupported;
+         if (!mFlashlightController.isAvailable()) {
+             state.secondaryLabel = mContext.getString(
+                     R.string.quick_settings_flashlight_camera_in_use);
+@@ -131,6 +239,22 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+             state.icon = maybeLoadResourceIcon(R.drawable.qs_flashlight_icon_off);
+             return;
+         }
++        if (mStrengthControlSupported) {
++            boolean enabled = mFlashlightController.isEnabled();
++            mCurrentPercent = Settings.System.getFloatForUser(
++                    mContext.getContentResolver(),
++                    FLASHLIGHT_BRIGHTNESS_SETTING,
++                    (float) mDefaultLevel / (float) mMaxLevel,
++                    UserHandle.USER_CURRENT
++            );
++
++            mCurrentPercent = Math.max(0.01f, mCurrentPercent);
++            
++            if (enabled) {
++                state.secondaryLabel = Math.round(mCurrentPercent * 100f) + "%";
++                state.stateDescription = state.secondaryLabel;
++            }
++        }
+         if (arg instanceof Boolean) {
+             boolean value = (Boolean) arg;
+             if (value == state.value) {
+@@ -166,4 +290,69 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+     public void onFlashlightAvailabilityChanged(boolean available) {
+         refreshState();
+     }
++
++    private final CameraManager.TorchCallback mTorchCallback = new CameraManager.TorchCallback() {
++        @Override
++        public void onTorchStrengthLevelChanged(@NonNull String cameraId, int newStrengthLevel) {
++            if (!cameraId.equals(mCameraId)) {
++                return;
++            }
++
++            if (mCurrentLevel == newStrengthLevel) {
++                return;
++            }
++
++            mCurrentLevel = newStrengthLevel;
++            mCurrentPercent = Math.max(0.01f, ((float) mCurrentLevel) / ((float) mMaxLevel));
++            Settings.System.putFloatForUser(
++                    mContext.getContentResolver(),
++                    FLASHLIGHT_BRIGHTNESS_SETTING,
++                    mCurrentPercent,
++                    UserHandle.USER_CURRENT);
++            refreshState(true);
++        }
++    };
++
++    private CameraManager getCameraManager() {
++        if (mCameraManager == null) {
++            mCameraManager = (CameraManager) mContext.getApplicationContext()
++                    .getSystemService(Context.CAMERA_SERVICE);
++        }
++        return mCameraManager;
++    }
++
++    private String getCameraId(CameraManager cm) throws CameraAccessException {
++        String[] ids = cm.getCameraIdList();
++        for (String id : ids) {
++            CameraCharacteristics c = cm.getCameraCharacteristics(id);
++            Boolean flashAvailable = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
++            Integer lensFacing = c.get(CameraCharacteristics.LENS_FACING);
++            if (flashAvailable != null
++                    && flashAvailable
++                    && lensFacing != null
++                    && lensFacing == CameraCharacteristics.LENS_FACING_BACK) {
++                return id;
++            }
++        }
++        return null;
++    }
++
++    private boolean isStrengthControlSupported() {
++        CameraManager cm = getCameraManager();
++        if (cm == null) return false;
++
++        try {
++            mCameraId = getCameraId(cm);
++            if (mCameraId != null) {
++                CameraCharacteristics c = cm.getCameraCharacteristics(mCameraId);
++                Boolean flashAvailable = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
++                mDefaultLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL);
++                mMaxLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
++                if (flashAvailable && mMaxLevel > mDefaultLevel) {
++                    return true;
++                }
++            }
++        } catch (CameraAccessException e) {}
++        return false;
++    }
+ }
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+new file mode 100644
+index 000000000000..0934062c105a
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/dialog/FlashlightDialogDelegate.kt
+@@ -0,0 +1,177 @@
++/*
++ * Copyright (C) 2025 Neoteric OS
++             (C) 2024-2025 The Clover Project
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.android.systemui.qs.tiles.dialog
++
++import android.content.Context
++import android.hardware.camera2.CameraAccessException
++import android.hardware.camera2.CameraCharacteristics
++import android.hardware.camera2.CameraManager
++import android.os.Bundle
++import android.os.UserHandle
++import android.os.VibrationEffect
++import android.os.Vibrator
++import android.provider.Settings
++import android.util.Log
++import android.widget.Button
++import android.widget.FrameLayout
++import android.view.ContextThemeWrapper
++import android.view.Gravity
++import androidx.annotation.MainThread
++import com.android.systemui.dagger.qualifiers.Background
++import com.android.systemui.dagger.qualifiers.Main
++import com.android.systemui.res.R
++import com.android.systemui.statusbar.phone.SystemUIDialog
++import com.android.systemui.statusbar.policy.FlashlightController
++import com.android.systemui.util.concurrency.DelayableExecutor
++import com.google.android.material.slider.Slider
++import javax.inject.Inject
++
++class FlashlightDialogDelegate @Inject constructor(
++    private val context: Context,
++    private val systemUIDialogFactory: SystemUIDialog.Factory,
++    @Main private val mainExecutor: DelayableExecutor,
++    @Background private val backgroundExecutor: DelayableExecutor,
++    private val flashlightController: FlashlightController
++) : SystemUIDialog.Delegate {
++
++    private lateinit var slider: Slider
++
++    private val cameraManager: CameraManager?
++        get() = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager
++    private var cameraId: String? = null
++    private var maxLevel: Int = 1
++    private var defaultLevel: Int = 1
++    private var currentPercent: Float = 1f
++
++    private val vibrator = context.getSystemService(Vibrator::class.java)
++    private val flashlightMoveHaptic: VibrationEffect =
++        VibrationEffect.get(VibrationEffect.EFFECT_TICK)
++
++    override fun createDialog(): SystemUIDialog = systemUIDialogFactory.create(this)
++
++    override fun beforeCreate(dialog: SystemUIDialog, savedInstanceState: Bundle?) {
++        dialog.setTitle(R.string.flashlight_strength_title)
++        
++        val container = FrameLayout(dialog.context)
++
++        val themedContext = ContextThemeWrapper(dialog.context, 
++                com.google.android.material.R.style.Theme_Material3_DynamicColors_DayNight)
++        slider = Slider(themedContext).apply {
++            layoutParams = FrameLayout.LayoutParams(
++                FrameLayout.LayoutParams.MATCH_PARENT,
++                FrameLayout.LayoutParams.WRAP_CONTENT,
++                Gravity.CENTER
++            )
++        }
++
++        container.addView(slider)
++        dialog.setView(container)
++        dialog.setPositiveButton(R.string.quick_settings_done, null, true)
++        dialog.setNeutralButton(
++            if (flashlightController.isEnabled())
++                R.string.flashlight_strength_turn_off
++            else
++                R.string.flashlight_strength_turn_on,
++            { _, _ ->
++                val newState = !flashlightController.isEnabled()
++                if (newState) {
++                    val level = (currentPercent * maxLevel).toInt()
++                    val safeLevel = maxOf(level, 1)
++                    cameraId?.let { id ->
++                        try {
++                            cameraManager?.turnOnTorchWithStrengthLevel(id, safeLevel)
++                        } catch (_: CameraAccessException) {}
++                    }
++                } else {
++                    flashlightController.setFlashlight(false)
++                }
++
++                slider.isEnabled = newState
++
++                dialog.getButton(SystemUIDialog.BUTTON_NEUTRAL)?.text =
++                    if (newState)
++                        dialog.context.getString(R.string.flashlight_strength_turn_off)
++                    else
++                        dialog.context.getString(R.string.flashlight_strength_turn_on)
++            },
++            false
++        )
++    }
++
++    override fun onCreate(dialog: SystemUIDialog, savedInstanceState: Bundle?) {
++        val defaultPercent = defaultLevel.toFloat() / maxLevel.toFloat()
++        currentPercent = Settings.System.getFloatForUser(
++            dialog.context.contentResolver,
++            FLASHLIGHT_BRIGHTNESS_SETTING,
++            defaultPercent,
++            UserHandle.USER_CURRENT
++        )
++
++        slider.isEnabled = flashlightController.isEnabled()
++        slider.valueFrom = 1f
++        slider.valueTo = 100f
++        slider.value = (currentPercent * 100f).coerceAtLeast(1f)
++        slider.setLabelFormatter { value ->
++            value.toInt().toString()
++        }
++
++        var last = -1
++        slider.addOnChangeListener { _, value, fromUser ->
++            if (fromUser) {
++                val percent = (value / 100f)
++                val p = Math.round(percent * 100)
++                if (p != last) {
++                    vibrator?.vibrate(flashlightMoveHaptic)
++                    last = p
++                }
++                currentPercent = percent
++                updateFlashlightStrength()
++            }
++        }
++    }
++
++    @MainThread
++    private fun updateFlashlightStrength() {
++        Settings.System.putFloatForUser(
++            context.contentResolver,
++            FLASHLIGHT_BRIGHTNESS_SETTING,
++            currentPercent,
++            UserHandle.USER_CURRENT
++        )
++
++        if (cameraId != null) {
++            try {
++                val level = (currentPercent * maxLevel).toInt().coerceAtLeast(1)
++                cameraManager?.turnOnTorchWithStrengthLevel(cameraId!!, level)
++            } catch (e: CameraAccessException) {
++                Log.e(TAG, "Unable to set torch strength", e)
++            }
++        }
++    }
++
++    fun setCameraInfo(camId: String?, maxLvl: Int, defLvl: Int): FlashlightDialogDelegate {
++        cameraId = camId
++        maxLevel = maxLvl
++        defaultLevel = defLvl
++        return this
++    }
++
++    companion object {
++        private const val TAG = "FlashlightDialogDelegate"
++        private const val FLASHLIGHT_BRIGHTNESS_SETTING = "flashlight_brightness"
++    }
++}
+-- 
+2.43.0
+

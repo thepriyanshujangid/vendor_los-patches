@@ -1,0 +1,33 @@
+From d81ea8e2fe0264071dd019ef6011657de63319f5 Mon Sep 17 00:00:00 2001
+From: Abhay Singh Gill <abhaygill017@gmail.com>
+Date: Sat, 31 May 2025 11:02:28 +0530
+Subject: [PATCH] bouncycastle: Add EC/ECDSA provider to get our keybox
+ spoofing working
+
+Change-Id: Id970127f01bb331ff622c7c13f1c1c2b5212a9f1
+Signed-off-by: Abhay Singh Gill <abhaygill017@gmail.com>
+---
+ .../org/bouncycastle/jcajce/provider/asymmetric/EC.java      | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/repackaged_platform/bcprov/src/main/java/com/android/internal/org/bouncycastle/jcajce/provider/asymmetric/EC.java b/repackaged_platform/bcprov/src/main/java/com/android/internal/org/bouncycastle/jcajce/provider/asymmetric/EC.java
+index d9ae497d..4ae51ec4 100644
+--- a/repackaged_platform/bcprov/src/main/java/com/android/internal/org/bouncycastle/jcajce/provider/asymmetric/EC.java
++++ b/repackaged_platform/bcprov/src/main/java/com/android/internal/org/bouncycastle/jcajce/provider/asymmetric/EC.java
+@@ -201,9 +201,12 @@ public class EC
+             provider.addAlgorithm("KeyFactory.ECDSA", PREFIX + "KeyFactorySpi$ECDSA");
+             provider.addAlgorithm("KeyFactory.ECDH", PREFIX + "KeyFactorySpi$ECDH");
+             provider.addAlgorithm("KeyFactory.ECDHC", PREFIX + "KeyFactorySpi$ECDHC");
+-            
++            */
++
+             provider.addAlgorithm("KeyPairGenerator.EC", PREFIX + "KeyPairGeneratorSpi$EC");
+             provider.addAlgorithm("KeyPairGenerator.ECDSA", PREFIX + "KeyPairGeneratorSpi$ECDSA");
++
++            /*
+             provider.addAlgorithm("KeyPairGenerator.ECDH", PREFIX + "KeyPairGeneratorSpi$ECDH");
+             provider.addAlgorithm("KeyPairGenerator.ECDHWITHSHA1KDF", PREFIX + "KeyPairGeneratorSpi$ECDH");
+             provider.addAlgorithm("KeyPairGenerator.ECDHC", PREFIX + "KeyPairGeneratorSpi$ECDHC");
+-- 
+2.43.0
+

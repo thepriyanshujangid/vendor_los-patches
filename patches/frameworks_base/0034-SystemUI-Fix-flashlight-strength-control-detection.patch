@@ -1,0 +1,33 @@
+From 75ebb1b1ed5428f3638cb6e11966dd7a03ea84db Mon Sep 17 00:00:00 2001
+From: NurKeinNeid <nurkeinneid@derpfest.org>
+Date: Fri, 19 Sep 2025 01:42:17 +0200
+Subject: [PATCH 34/39] SystemUI: Fix flashlight strength control detection
+
+Change detection logic from 'mMaxLevel > mDefaultLevel' to 'mMaxLevel > 1'
+to properly detect devices where max and default levels are equal.
+
+Fixes flashlight strength control not working on some devices.
+
+Change-Id: I350d9fcf7f0f756442235a913c64256849d58842
+Signed-off-by: NurKeinNeid <nurkeinneid@derpfest.org>
+---
+ .../src/com/android/systemui/qs/tiles/FlashlightTile.java      | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+index 45774b9a3d2c..ffea4ba49547 100644
+--- a/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
++++ b/packages/SystemUI/src/com/android/systemui/qs/tiles/FlashlightTile.java
+@@ -348,7 +348,8 @@ public class FlashlightTile extends QSTileImpl<BooleanState> implements
+                 Boolean flashAvailable = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                 mDefaultLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL);
+                 mMaxLevel = c.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
+-                if (flashAvailable && mMaxLevel > mDefaultLevel) {
++                // Use the same logic as the old implementation: mMaxLevel > 1
++                if (flashAvailable && mMaxLevel > 1) {
+                     return true;
+                 }
+             }
+-- 
+2.43.0
+
